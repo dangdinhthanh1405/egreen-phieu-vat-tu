@@ -4,7 +4,7 @@
  * Full optimized version
  ****************************************************/
 
-const API_URL = 'https://script.google.com/macros/s/AKfycbwltnPt4vVZGnT0flC2dhA6E2QuVLd0z2erdm2hEPzUSeknFqDnJuNiIHKtZv0X0Zbg/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzG7NTfUZrl1q2wGQcjgem9K7fTN6LC18GNisN8pqQyxAOUKQ9-QhUzBHkcNhEnbvza/exec';
 
 const STORAGE_KEY = 'EGREEN_PHIEU_VAT_TU_SESSION_V2';
 const AUTO_REFRESH_MS = 30000;
