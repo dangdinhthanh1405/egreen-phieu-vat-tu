@@ -6,6 +6,8 @@ let ACCOUNT_CACHE = [];
 let AUTO_REFRESH_TIMER = null;
 let SELECTED_MEMBERS = [];
 let EDITING_MA_PHIEU = '';
+let IS_BUSY = false;
+let LAST_ACTIVE_TAB = 'formTab';
 
 let APP = {
   may: [],
