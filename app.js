@@ -880,11 +880,8 @@ function renderPhieuList(list) {
 async function previewCurrentForm() {
   return runBusy('Đang xem trước...', async () => {
     try {
-      const html = await api('previewDraft', {
-        token: TOKEN,
-        payload: buildCurrentPayload()
-      });
-
+      const payload = buildCurrentPayload();
+      const html = renderPreviewHtmlClient(payload);
       openPreview(html);
     } catch (err) {
       alert(err.message);
@@ -1169,6 +1166,308 @@ function safeId(str) {
   return removeTone(String(str || ''))
     .replace(/[^a-zA-Z0-9]/g, '_')
     .slice(0, 40);
+}
+
+function renderPreviewHtmlClient(payload) {
+  const phieu = {
+    maPhieu: payload.maPhieu || 'BẢN XEM TRƯỚC',
+    doiTruong: payload.doiTruong || '',
+    thanhVien: Array.isArray(payload.thanhVien) ? payload.thanhVien.join('; ') : payload.thanhVien || '',
+    maMay: payload.maMay || '',
+    tenTrai: payload.tenTrai || '',
+    ngayGioXuatKho: payload.ngayGioXuatKho || '',
+    ngayGioNhapKho: payload.ngayGioNhapKho || '',
+    nguoiXuatKho: payload.nguoiXuatKho || '',
+    nguoiNhapKho: payload.nguoiNhapKho || '',
+    mucDich: payload.mucDich || '',
+    cuThe: payload.cuThe || ''
+  };
+
+  const rows = (payload.items || []).map((x, i) => {
+    const tt = String(x.tinhTrangXuatKho || '').trim();
+
+    const checkedMoi = tt === 'Mới' ? '✓' : '';
+    const checkedCu = tt === 'Cũ' ? '✓' : '';
+    const checkedTot = tt === 'Tốt' ? '✓' : '';
+    const checkedKxd = tt === 'K.xđ' || tt === 'KXĐ' || tt === 'Không xác định' ? '✓' : '';
+
+    return `
+      <tr>
+        <td class="center">${i + 1}</td>
+        <td>${escapeHtml(x.tenVatTu)}</td>
+        <td class="center">${escapeHtml(x.soLuongCan || '')}</td>
+        <td class="center"></td>
+
+        <td class="center">${checkedMoi}</td>
+        <td class="center">${checkedCu}</td>
+        <td class="center">${checkedTot}</td>
+        <td class="center">${checkedKxd}</td>
+
+        <td class="center"></td>
+        <td class="center"></td>
+
+        <td class="center"></td>
+        <td class="center"></td>
+        <td class="center"></td>
+        <td class="center"></td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  body {
+    font-family: "Times New Roman", serif;
+    font-size: 13px;
+    color: #000;
+    margin: 0;
+    background: #fff;
+  }
+
+  .page {
+    width: 297mm;
+    min-height: 210mm;
+    margin: 0 auto;
+    padding: 8mm 10mm;
+    box-sizing: border-box;
+    background: #fff;
+  }
+
+  .title {
+    text-align: center;
+    font-size: 21px;
+    font-weight: bold;
+    text-transform: uppercase;
+    margin-bottom: 18px;
+  }
+
+  .top-grid {
+    display: grid;
+    grid-template-columns: 1.05fr 1.05fr 1.05fr 1.05fr;
+    gap: 26px;
+    margin-bottom: 12px;
+    font-size: 14px;
+  }
+
+  .top-block-title {
+    font-weight: bold;
+    margin-bottom: 6px;
+  }
+
+  .line {
+    display: block;
+    border-bottom: 1px dotted #000;
+    min-height: 20px;
+    margin-bottom: 7px;
+    word-break: break-word;
+  }
+
+  .purpose-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    margin: 18px 35px 14px;
+    font-size: 15px;
+    font-weight: bold;
+  }
+
+  .purpose-row div {
+    text-align: center;
+  }
+
+  .dot {
+    font-size: 20px;
+    vertical-align: middle;
+    margin-right: 10px;
+  }
+
+  .section-title {
+    font-weight: bold;
+    font-size: 15px;
+    margin: 10px 0 6px;
+  }
+
+  .detail-line {
+    border-bottom: 1px dotted #000;
+    min-height: 22px;
+    margin-bottom: 4px;
+    padding-left: 4px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    border: 1px solid #000;
+    padding: 4px;
+    vertical-align: middle;
+  }
+
+  th {
+    text-align: center;
+    font-weight: bold;
+  }
+
+  .center {
+    text-align: center;
+  }
+
+  .vt-table {
+    font-size: 12.5px;
+    table-layout: fixed;
+  }
+
+  .vt-table th,
+  .vt-table td {
+    height: 23px;
+  }
+
+  .col-stt {
+    width: 32px;
+  }
+
+  .col-name {
+    width: 275px;
+  }
+
+  .col-small {
+    width: 72px;
+  }
+
+  .col-status {
+    width: 42px;
+  }
+
+  .sign {
+    margin-top: 24px;
+  }
+
+  .sign td {
+    border: none;
+    text-align: center;
+    height: 70px;
+    font-weight: bold;
+  }
+</style>
+</head>
+
+<body>
+<div class="page">
+  <div class="title">DANH SÁCH VẬT TƯ</div>
+
+  <div class="top-grid">
+    <div>
+      <div class="top-block-title">1. Đội nhóm nhận nhiệm vụ</div>
+      <div>Đội trưởng:</div>
+      <span class="line">${escapeHtml(phieu.doiTruong)}</span>
+      <div>Thành viên:</div>
+      <span class="line">${escapeHtml(phieu.thanhVien)}</span>
+    </div>
+
+    <div>
+      <div class="top-block-title">2. Mã hệ thống đảm nhiệm</div>
+      <div>Mã máy:</div>
+      <span class="line">${escapeHtml(phieu.maMay)}</span>
+      <div>Địa chỉ trại:</div>
+      <span class="line">${escapeHtml(phieu.tenTrai)}</span>
+    </div>
+
+    <div>
+      <div class="top-block-title">3. Thời gian thực hiện</div>
+      <div>Ngày/giờ xuất kho:</div>
+      <span class="line">${escapeHtml(phieu.ngayGioXuatKho)}</span>
+      <div>Ngày/giờ nhập kho:</div>
+      <span class="line">${escapeHtml(phieu.ngayGioNhapKho)}</span>
+    </div>
+
+    <div>
+      <div class="top-block-title">4. Thành viên thực hiện</div>
+      <div>Xuất kho:</div>
+      <span class="line">${escapeHtml(phieu.nguoiXuatKho)}</span>
+      <div>Nhập kho:</div>
+      <span class="line">${escapeHtml(phieu.nguoiNhapKho)}</span>
+    </div>
+  </div>
+
+  <div class="section-title">5. Mục đích sử dụng vật tư</div>
+
+  <div class="purpose-row">
+    <div>
+      <span class="dot">${phieu.mucDich === 'Bảo dưỡng sửa chữa' ? '●' : '○'}</span>
+      Bảo dưỡng sửa chữa
+    </div>
+    <div>
+      <span class="dot">${phieu.mucDich === 'Lắp đặt' ? '●' : '○'}</span>
+      Lắp đặt
+    </div>
+    <div>
+      <span class="dot">${phieu.mucDich === 'Sản xuất' ? '●' : '○'}</span>
+      Sản xuất
+    </div>
+  </div>
+
+  <div><b>Cụ thể:</b></div>
+  <div class="detail-line">${escapeHtml(phieu.cuThe)}</div>
+  <div class="detail-line"></div>
+
+  <div class="section-title">6. Danh sách vật tư cần chuẩn bị</div>
+
+  <table class="vt-table">
+    <thead>
+      <tr>
+        <th rowspan="2" class="col-stt">TT</th>
+        <th rowspan="2" class="col-name">Hạng mục vật tư</th>
+        <th rowspan="2" class="col-small">Số lượng<br>cần</th>
+        <th rowspan="2" class="col-small">Số lượng<br>xuất kho</th>
+
+        <th colspan="4">Tình trạng</th>
+
+        <th rowspan="2" class="col-small">Số lượng<br>sử dụng</th>
+        <th rowspan="2" class="col-small">Số lượng<br>nhập kho</th>
+
+        <th colspan="4">Tình trạng</th>
+      </tr>
+
+      <tr>
+        <th class="col-status">Mới</th>
+        <th class="col-status">Cũ</th>
+        <th class="col-status">Tốt</th>
+        <th class="col-status">K.xđ</th>
+
+        <th class="col-status">Mới</th>
+        <th class="col-status">Cũ</th>
+        <th class="col-status">Tốt</th>
+        <th class="col-status">Hỏng</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      ${rows || '<tr><td colspan="14" class="center">Chưa có vật tư</td></tr>'}
+    </tbody>
+  </table>
+
+  <table class="sign">
+    <tr>
+      <td>Người lập phiếu</td>
+      <td>Người xuất kho</td>
+      <td>Đội trưởng</td>
+      <td>Người nhập kho</td>
+    </tr>
+  </table>
+</div>
+</body>
+</html>`;
 }
 
 function escapeHtml(str) {
