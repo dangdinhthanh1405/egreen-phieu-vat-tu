@@ -1,9 +1,13 @@
 /****************************************************
  * eGreen - Phiếu vật tư
  * Frontend GitHub Pages
+ * Optimized version
  ****************************************************/
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbylZkHsgDM7M0AC52da4LrHKOWoPbmJiiIRbmYZ_FH9mCaA-KTaByJRj4bEWJiE3-Y/exec';
+
+const STORAGE_KEY = 'EGREEN_PHIEU_VAT_TU_SESSION_V1';
+const AUTO_REFRESH_MS = 30000;
 
 let TOKEN = '';
 let CURRENT_USER = null;
@@ -13,6 +17,7 @@ let SELECTED_MEMBERS = [];
 let EDITING_MA_PHIEU = '';
 let IS_BUSY = false;
 let LAST_ACTIVE_TAB = 'formTab';
+let IS_BOOTING = false;
 
 let APP = {
   may: [],
@@ -135,12 +140,12 @@ async function apiChunked_(payloadText) {
  ****************************************************/
 
 window.onload = function () {
-  const loginPage = document.getElementById('loginPage');
-  const appPage = document.getElementById('appPage');
+  bindGlobalEvents();
+  initLoginRememberCheckbox();
+  bootApp();
+};
 
-  if (loginPage) loginPage.classList.remove('hidden');
-  if (appPage) appPage.classList.add('hidden');
-
+function bindGlobalEvents() {
   document.addEventListener('click', function (e) {
     const multi = document.getElementById('thanhVienMulti');
     const dropdown = document.getElementById('thanhVienDropdown');
@@ -156,13 +161,114 @@ window.onload = function () {
     }
   });
 
+  const loginUsername = document.getElementById('loginUsername');
   const loginPassword = document.getElementById('loginPassword');
-  if (loginPassword) {
-    loginPassword.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') doLogin();
+
+  [loginUsername, loginPassword].forEach(el => {
+    if (!el) return;
+
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doLogin();
+      }
     });
+  });
+}
+
+function initLoginRememberCheckbox() {
+  const remember = document.getElementById('rememberLogin');
+  if (!remember) return;
+
+  remember.checked = true;
+}
+
+async function bootApp() {
+  IS_BOOTING = true;
+
+  const loginPage = document.getElementById('loginPage');
+  const appPage = document.getElementById('appPage');
+  const msg = document.getElementById('loginMsg');
+
+  if (loginPage) loginPage.classList.remove('hidden');
+  if (appPage) appPage.classList.add('hidden');
+
+  const saved = loadSavedSession();
+
+  if (!saved || !saved.token) {
+    IS_BOOTING = false;
+    return;
   }
-};
+
+  TOKEN = saved.token;
+  CURRENT_USER = saved.user || null;
+
+  if (msg) msg.innerText = 'Đang khôi phục đăng nhập...';
+
+  try {
+    const data = await api('getAppData', { token: TOKEN });
+
+    initApp(data);
+    startAutoRefresh();
+
+    if (msg) msg.innerText = '';
+  } catch (err) {
+    clearSavedSession();
+    TOKEN = '';
+    CURRENT_USER = null;
+
+    if (loginPage) loginPage.classList.remove('hidden');
+    if (appPage) appPage.classList.add('hidden');
+
+    if (msg) msg.innerText = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+  } finally {
+    IS_BOOTING = false;
+  }
+}
+
+
+/****************************************************
+ * SESSION STORAGE
+ ****************************************************/
+
+function saveSession() {
+  if (!TOKEN || !CURRENT_USER) return;
+
+  const remember = document.getElementById('rememberLogin');
+  const shouldRemember = remember ? remember.checked : true;
+
+  if (!shouldRemember) {
+    clearSavedSession();
+    return;
+  }
+
+  const data = {
+    token: TOKEN,
+    user: CURRENT_USER,
+    savedAt: new Date().toISOString()
+  };
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (e) {}
+}
+
+function loadSavedSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearSavedSession() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch (e) {}
+}
 
 
 /****************************************************
@@ -200,7 +306,7 @@ function setBusy(isBusy, message) {
 
   if (saveBtn) {
     if (isBusy) {
-      saveBtn.dataset.oldText = saveBtn.innerText;
+      if (!saveBtn.dataset.oldText) saveBtn.dataset.oldText = saveBtn.innerText;
       saveBtn.innerText = message || 'Đang xử lý...';
     } else if (saveBtn.dataset.oldText) {
       saveBtn.innerText = saveBtn.dataset.oldText;
@@ -236,6 +342,8 @@ function startAutoRefresh() {
   AUTO_REFRESH_TIMER = setInterval(() => {
     if (!TOKEN) return;
     if (IS_BUSY) return;
+    if (IS_BOOTING) return;
+    if (document.hidden) return;
 
     if (LAST_ACTIVE_TAB === 'formTab') {
       loadApp(true);
@@ -252,7 +360,7 @@ function startAutoRefresh() {
         loadAccounts(true);
       }
     }
-  }, 30000);
+  }, AUTO_REFRESH_MS);
 }
 
 
@@ -264,6 +372,7 @@ async function doLogin() {
   const username = getValue('loginUsername').trim();
   const password = getValue('loginPassword').trim();
   const msg = document.getElementById('loginMsg');
+  const loginBtn = document.getElementById('loginBtn');
 
   if (!username || !password) {
     if (msg) msg.innerText = 'Vui lòng nhập đủ tên đăng nhập và mật khẩu.';
@@ -271,6 +380,7 @@ async function doLogin() {
   }
 
   if (msg) msg.innerText = 'Đang đăng nhập...';
+  if (loginBtn) loginBtn.disabled = true;
 
   try {
     const res = await api('login', {
@@ -281,12 +391,18 @@ async function doLogin() {
     TOKEN = res.token;
     CURRENT_USER = res.user;
 
+    saveSession();
+
     initApp(res.appData);
     startAutoRefresh();
 
     if (msg) msg.innerText = '';
   } catch (err) {
+    clearSavedSession();
+
     if (msg) msg.innerText = 'Lỗi đăng nhập: ' + err.message;
+  } finally {
+    if (loginBtn) loginBtn.disabled = false;
   }
 }
 
@@ -299,11 +415,14 @@ async function doLogout() {
     } catch (e) {}
   }
 
+  clearSavedSession();
+
   TOKEN = '';
   CURRENT_USER = null;
   ACCOUNT_CACHE = [];
   SELECTED_MEMBERS = [];
   EDITING_MA_PHIEU = '';
+  LAST_ACTIVE_TAB = 'formTab';
 
   APP = {
     may: [],
@@ -325,6 +444,9 @@ async function doLogout() {
 
   const msg = document.getElementById('loginMsg');
   if (msg) msg.innerText = '';
+
+  const firstNav = document.querySelector('.nav');
+  showTabById('formTab');
 }
 
 
@@ -344,13 +466,17 @@ async function loadApp(isAutoRefresh) {
       initApp(data);
     }
   } catch (err) {
-    if (!isAutoRefresh) alert(err.message);
+    if (!isAutoRefresh) {
+      alert(err.message);
+    }
   }
 }
 
 function initApp(data) {
   APP = { ...APP, ...data };
-  CURRENT_USER = data.currentUser;
+  CURRENT_USER = data.currentUser || CURRENT_USER;
+
+  saveSession();
 
   const loginPage = document.getElementById('loginPage');
   const appPage = document.getElementById('appPage');
@@ -359,7 +485,7 @@ function initApp(data) {
   if (appPage) appPage.classList.remove('hidden');
 
   const userBox = document.getElementById('userBox');
-  if (userBox) {
+  if (userBox && CURRENT_USER) {
     userBox.innerHTML = `
       <b>${escapeHtml(CURRENT_USER.fullName || CURRENT_USER.username)}</b><br>
       Vai trò: ${escapeHtml(CURRENT_USER.role)}
@@ -368,7 +494,7 @@ function initApp(data) {
 
   const adminNav = document.getElementById('adminNav');
 
-  if (CURRENT_USER.role === 'admin') {
+  if (CURRENT_USER && CURRENT_USER.role === 'admin') {
     if (adminNav) adminNav.classList.remove('hidden');
     loadAccounts(false);
   } else {
@@ -394,9 +520,12 @@ function refreshAppDataOnly(data) {
   const oldHienTuong = getValue('hienTuong');
   const oldNguoiXuatKho = getValue('nguoiXuatKho');
   const oldNguoiNhapKho = getValue('nguoiNhapKho');
+  const oldSearch = getValue('searchVatTu');
 
   APP = { ...APP, ...data };
-  CURRENT_USER = data.currentUser;
+  CURRENT_USER = data.currentUser || CURRENT_USER;
+
+  saveSession();
 
   reloadSelectOptionsFromAppData();
 
@@ -408,6 +537,7 @@ function refreshAppDataOnly(data) {
   setSelectValue('hienTuong', oldHienTuong);
   setSelectValue('nguoiXuatKho', oldNguoiXuatKho);
   setSelectValue('nguoiNhapKho', oldNguoiNhapKho);
+  setInputValue('searchVatTu', oldSearch);
 
   onMayChange();
   renderVatTuSearch();
@@ -482,6 +612,8 @@ function normKeyClient(s) {
 }
 
 function getValClient(row, keys) {
+  if (!row) return '';
+
   const normKeys = keys.map(normKeyClient);
 
   for (const k in row) {
@@ -556,7 +688,7 @@ function getValue(id) {
 
 function setInputValue(id, value) {
   const el = document.getElementById(id);
-  if (el) el.value = value;
+  if (el) el.value = value || '';
 }
 
 function setText(id, value) {
@@ -574,7 +706,7 @@ function setDefaultDateTime() {
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
 
   const el = document.getElementById('ngayGioXuatKho');
-  if (el) el.value = now.toISOString().slice(0, 16);
+  if (el && !el.value) el.value = now.toISOString().slice(0, 16);
 }
 
 function onMayChange() {
@@ -672,9 +804,28 @@ function buildCurrentPayload() {
   };
 }
 
+function validatePayloadBeforeSave(payload) {
+  if (!payload.doiTruong) return 'Chưa chọn đội trưởng.';
+  if (!payload.thanhVien || !payload.thanhVien.length) return 'Chưa chọn thành viên.';
+  if (!payload.maMay) return 'Chưa chọn mã máy.';
+  if (!payload.ngayGioXuatKho) return 'Chưa chọn ngày giờ xuất kho.';
+  if (!payload.nguoiXuatKho) return 'Chưa chọn thành viên xuất kho.';
+  if (!payload.mucDich) return 'Chưa chọn mục đích sử dụng vật tư.';
+  if (!payload.cuThe) return 'Chưa nhập/chọn nội dung cụ thể.';
+  if (!payload.items || !payload.items.length) return 'Chưa có vật tư trong danh sách.';
+
+  return '';
+}
+
 async function save() {
   return runBusy(EDITING_MA_PHIEU ? 'Đang cập nhật phiếu...' : 'Đang lưu phiếu...', async () => {
     const payload = buildCurrentPayload();
+    const invalid = validatePayloadBeforeSave(payload);
+
+    if (invalid) {
+      alert(invalid);
+      return;
+    }
 
     try {
       let res;
@@ -729,16 +880,17 @@ function resetFormAfterSave() {
   setSelectValue('nguoiNhapKho', '');
 
   setInputValue('ngayGioNhapKho', '');
+  setInputValue('ngayGioXuatKho', '');
   setDefaultDateTime();
 
   const defaultMucDich = document.querySelector('input[name="mucDich"][value="Bảo dưỡng sửa chữa"]');
   if (defaultMucDich) defaultMucDich.checked = true;
 
-  onMucDichChange();
-
   setSelectValue('hienTuong', '');
   setInputValue('cuTheNhapTay', '');
   setInputValue('searchVatTu', '');
+
+  onMucDichChange();
 
   renderVatTuCoDinh();
 }
@@ -857,31 +1009,29 @@ function renderVatTuCoDinh() {
   renderVatTuSearch();
 }
 
+function getRelatedCumByHienTuong() {
+  const mucDich = getMucDich();
+
+  if (mucDich !== 'Bảo dưỡng sửa chữa') return [];
+
+  const ht = getValue('hienTuong');
+  if (!ht) return [];
+
+  return APP.hienTuong
+    .filter(x => getValClient(x, ['Hiện Tượng/Sự cố', 'Hiện tượng/Sự cố', 'Hiện tượng']) === ht)
+    .map(x => getValClient(x, ['Cụm Linh Kiện Liên Quan', 'Cụm Linh Kiện', 'Cụm linh kiện']))
+    .filter(Boolean);
+}
+
 function renderVatTuSearch() {
   const box = document.getElementById('vatTuSearchList');
   const searchEl = document.getElementById('searchVatTu');
 
-  if (!box || !searchEl) return;
+  if (!box) return;
 
-  const keyword = removeTone(searchEl.value || '').toLowerCase().trim();
-
-  if (!keyword) {
-    box.classList.add('hidden');
-    box.innerHTML = '';
-    return;
-  }
-
+  const keyword = removeTone((searchEl && searchEl.value) || '').toLowerCase().trim();
   const mucDich = getMucDich();
-  let cumLienQuan = [];
-
-  if (mucDich === 'Bảo dưỡng sửa chữa') {
-    const ht = getValue('hienTuong');
-
-    cumLienQuan = APP.hienTuong
-      .filter(x => getValClient(x, ['Hiện Tượng/Sự cố', 'Hiện tượng/Sự cố', 'Hiện tượng']) === ht)
-      .map(x => getValClient(x, ['Cụm Linh Kiện Liên Quan', 'Cụm Linh Kiện', 'Cụm linh kiện']))
-      .filter(Boolean);
-  }
+  const cumLienQuan = getRelatedCumByHienTuong();
 
   const selectedNames = new Set(APP.selected.map(x => normalizeName(x.tenVatTu)));
 
@@ -897,58 +1047,81 @@ function renderVatTuSearch() {
     if (!ten) return false;
     if (selectedNames.has(normalizeName(ten))) return false;
 
-    if (mucDich === 'Bảo dưỡng sửa chữa' && cumLienQuan.length) {
-      if (!cumLienQuan.includes(cum)) return false;
+    if (mucDich === 'Bảo dưỡng sửa chữa') {
+      const ht = getValue('hienTuong');
+
+      if (ht && cumLienQuan.length && !cumLienQuan.includes(cum)) return false;
     }
 
-    const text = removeTone(ten + ' ' + cum).toLowerCase();
+    if (keyword) {
+      const text = removeTone(ten + ' ' + cum).toLowerCase();
+      if (!text.includes(keyword)) return false;
+    }
 
-    return text.includes(keyword);
+    return true;
   });
 
+  box.classList.remove('hidden');
+
   if (!list.length) {
-    box.classList.remove('hidden');
     box.innerHTML = `
-      <div class="suggest-row">
+      <div class="suggest-row suggest-empty">
         <div></div>
-        <div>Không tìm thấy vật tư phù hợp.</div>
+        <div>Không có vật tư phù hợp.</div>
       </div>
     `;
     return;
   }
 
-  box.classList.remove('hidden');
+  const groups = {};
 
-  box.innerHTML = list.map((v, i) => {
-    const ten = getValClient(v, [
-      'Tên Chi Tiết / Linh Kiện Thay Thế',
-      'Hạng mục vật tư',
-      'Tên vật tư'
-    ]);
+  list.forEach(v => {
+    const cum = getValClient(v, ['Cụm Linh Kiện', 'Cụm linh kiện']) || 'Khác';
 
-    const cum = getValClient(v, ['Cụm Linh Kiện', 'Cụm linh kiện']);
-    const maVT = getValClient(v, ['Mã Vật Tư', 'Mã vật tư']);
-    const dvt = getValClient(v, ['Đơn vị tính', 'ĐVT']);
-    const id = 'search_' + i + '_' + safeId(ten);
+    if (!groups[cum]) groups[cum] = [];
+    groups[cum].push(v);
+  });
+
+  box.innerHTML = Object.keys(groups).map(cum => {
+    const rows = groups[cum].map((v, i) => {
+      const ten = getValClient(v, [
+        'Tên Chi Tiết / Linh Kiện Thay Thế',
+        'Hạng mục vật tư',
+        'Tên vật tư'
+      ]);
+
+      const maVT = getValClient(v, ['Mã Vật Tư', 'Mã vật tư']);
+      const dvt = getValClient(v, ['Đơn vị tính', 'ĐVT']);
+
+      return `
+        <div class="suggest-row">
+          <input type="checkbox" onchange="addVatTuFromSearch(this)"
+            data-ten="${escapeHtml(ten)}"
+            data-cum="${escapeHtml(cum)}"
+            data-mavt="${escapeHtml(maVT)}"
+            data-dvt="${escapeHtml(dvt)}">
+
+          <div>
+            <b>${escapeHtml(ten)}</b><br>
+            <small>${escapeHtml(cum)}</small>
+          </div>
+
+          <input type="number" min="0" value="1">
+
+          <select>
+            <option value="Mới">Mới</option>
+            <option value="Cũ">Cũ</option>
+            <option value="Tốt">Tốt</option>
+            <option value="K.xđ">K.xđ</option>
+          </select>
+        </div>
+      `;
+    }).join('');
 
     return `
-      <div class="suggest-row">
-        <input type="checkbox" onchange="addVatTuFromSearch(this)"
-          data-ten="${escapeHtml(ten)}"
-          data-cum="${escapeHtml(cum)}"
-          data-mavt="${escapeHtml(maVT)}"
-          data-dvt="${escapeHtml(dvt)}">
-        <div>
-          <b>${escapeHtml(ten)}</b><br>
-          <small>${escapeHtml(cum)}</small>
-        </div>
-        <input type="number" min="0" value="1" id="${id}_sl">
-        <select id="${id}_tt">
-          <option value="Mới">Mới</option>
-          <option value="Cũ">Cũ</option>
-          <option value="Tốt">Tốt</option>
-          <option value="K.xđ">K.xđ</option>
-        </select>
+      <div class="suggest-group">
+        <div class="suggest-group-title">${escapeHtml(cum)}</div>
+        ${rows}
       </div>
     `;
   }).join('');
@@ -958,8 +1131,8 @@ function addVatTuFromSearch(cb) {
   if (!cb.checked) return;
 
   const row = cb.closest('.suggest-row');
-  const sl = row.querySelector('input[type="number"]').value || 1;
-  const tt = row.querySelector('select').value || 'Mới';
+  const slInput = row ? row.querySelector('input[type="number"]') : null;
+  const ttSelect = row ? row.querySelector('select') : null;
 
   APP.selected.push({
     id: 'add_' + Date.now() + '_' + safeId(cb.dataset.ten),
@@ -968,20 +1141,13 @@ function addVatTuFromSearch(cb) {
     tenVatTu: cb.dataset.ten || '',
     maVatTu: cb.dataset.mavt || '',
     donViTinh: cb.dataset.dvt || '',
-    soLuongCan: sl,
-    tinhTrangXuatKho: tt,
+    soLuongCan: slInput ? slInput.value || 1 : 1,
+    tinhTrangXuatKho: ttSelect ? ttSelect.value || 'Mới' : 'Mới',
     ghiChu: ''
   });
 
-  setInputValue('searchVatTu', '');
-
-  const box = document.getElementById('vatTuSearchList');
-  if (box) {
-    box.classList.add('hidden');
-    box.innerHTML = '';
-  }
-
   renderSelected();
+  renderVatTuSearch();
 }
 
 function renderSelected() {
@@ -1225,7 +1391,7 @@ async function deletePhieuUI(maPhieu) {
         maPhieu
       });
 
-      alert('Đã xóa phiếu: ' + res.maPhieu);
+      alert('Đã xóa phiếu: ' + (res.maPhieu || maPhieu));
       await loadPhieuList(false);
     } catch (err) {
       alert(err.message);
@@ -1291,6 +1457,7 @@ function loadPhieuToForm(data) {
   }));
 
   renderSelected();
+  renderVatTuSearch();
 }
 
 function toDatetimeLocalValue(v) {
@@ -1528,7 +1695,7 @@ function renderPreviewHtmlClient(payload) {
   }
 
   body {
-    font-family: "Times New Roman", serif;
+    font-family: "Times New Roman", Times, serif;
     font-size: 13px;
     color: #000;
     margin: 0;
