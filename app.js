@@ -868,6 +868,7 @@ function renderPhieuList(list) {
                 <button class="small-btn" onclick="exportPdf('${escapeHtml(p.maPhieu)}')">PDF</button>
                 <button class="small-btn" onclick="exportWord('${escapeHtml(p.maPhieu)}')">Word</button>
                 <button class="small-btn secondary" onclick="editPhieu('${escapeHtml(p.maPhieu)}')">Sửa</button>
+                <button class="small-btn danger" onclick="deletePhieuUI('${escapeHtml(p.maPhieu)}')">Xóa</button>
               </td>
             </tr>
           `).join('')}
@@ -958,6 +959,29 @@ async function editPhieu(maPhieu) {
   } catch (err) {
     alert(err.message);
   }
+}
+
+async function deletePhieuUI(maPhieu) {
+  const ok = confirm(
+    'Bạn chắc chắn muốn xóa phiếu ' + maPhieu + '?\n\n' +
+    'Thao tác này sẽ xóa dữ liệu ở sheet 10, sheet 11 và chuyển file PDF/Word đã tạo vào thùng rác nếu có.'
+  );
+
+  if (!ok) return;
+
+  return runBusy('Đang xóa phiếu...', async () => {
+    try {
+      const res = await api('deletePhieu', {
+        token: TOKEN,
+        maPhieu
+      });
+
+      alert('Đã xóa phiếu: ' + res.maPhieu);
+      await loadPhieuList(false);
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 function loadPhieuToForm(data) {
