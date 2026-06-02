@@ -1,24 +1,18 @@
 /****************************************************
  * eGreen - Phiếu vật tư
- * Frontend GitHub Pages
- * Optimized version
+ * Frontend app.js for GitHub Pages
+ * Full optimized version
  ****************************************************/
 
-const API_URL = 'https://script.google.com/macros/s/AKfycbxUf_-LHZrqzrqzVZMAcU91tZshPabRrqf6BHZI7zaBcxIiMGmn41tlkbE0ft3d0Mkq/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbwIUyB1C3KX6hncel-7OjFmfKSmqAPR7X7Tw4ud64zr_1SF_Ej1EIX72OurCw93h9Ln/exec';
 
-const STORAGE_KEY = 'EGREEN_PHIEU_VAT_TU_SESSION_V1';
+const STORAGE_KEY = 'EGREEN_PHIEU_VAT_TU_SESSION_V2';
 const AUTO_REFRESH_MS = 30000;
+const JSONP_DIRECT_LIMIT = 1450;
+const JSONP_CHUNK_SIZE = 1200;
 
 let TOKEN = '';
 let CURRENT_USER = null;
-let ACCOUNT_CACHE = [];
-let AUTO_REFRESH_TIMER = null;
-let SELECTED_MEMBERS = [];
-let EDITING_MA_PHIEU = '';
-let IS_BUSY = false;
-let LAST_ACTIVE_TAB = 'formTab';
-let IS_BOOTING = false;
-
 let APP = {
   may: [],
   hienTuong: [],
@@ -28,115 +22,16 @@ let APP = {
   selected: []
 };
 
-
-/****************************************************
- * API JSONP
- ****************************************************/
-
-function api(action, data = {}) {
-  const payloadText = JSON.stringify({ action, data });
-
-  if (payloadText.length <= 1500) {
-    return jsonpCall_(action, data);
-  }
-
-  return apiChunked_(payloadText);
-}
-
-function jsonpCall_(action, data = {}) {
-  return new Promise((resolve, reject) => {
-    const callbackName =
-      '__egreen_cb_' +
-      Date.now() +
-      '_' +
-      Math.random().toString(36).slice(2);
-
-    const payload = encodeURIComponent(JSON.stringify({
-      action,
-      data
-    }));
-
-    const script = document.createElement('script');
-
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error('API phản hồi quá lâu. Kiểm tra link Apps Script hoặc quyền triển khai.'));
-    }, 45000);
-
-    function cleanup() {
-      clearTimeout(timeout);
-
-      try {
-        delete window[callbackName];
-      } catch (e) {
-        window[callbackName] = undefined;
-      }
-
-      if (script && script.parentNode) {
-        script.parentNode.removeChild(script);
-      }
-    }
-
-    window[callbackName] = function (res) {
-      cleanup();
-
-      if (!res) {
-        reject(new Error('API không trả dữ liệu.'));
-        return;
-      }
-
-      if (!res.success) {
-        reject(new Error(res.message || 'API lỗi.'));
-        return;
-      }
-
-      resolve(res.data);
-    };
-
-    script.onerror = function () {
-      cleanup();
-      reject(new Error('Không gọi được Apps Script API. Kiểm tra API_URL hoặc quyền Web App.'));
-    };
-
-    script.src =
-      API_URL +
-      '?callback=' +
-      encodeURIComponent(callbackName) +
-      '&payload=' +
-      payload +
-      '&_=' +
-      Date.now();
-
-    document.body.appendChild(script);
-  });
-}
-
-async function apiChunked_(payloadText) {
-  const key =
-    'k_' +
-    Date.now() +
-    '_' +
-    Math.random().toString(36).slice(2);
-
-  const chunkSize = 1200;
-
-  await jsonpCall_('__chunkStart', { key });
-
-  for (let i = 0; i < payloadText.length; i += chunkSize) {
-    const chunk = payloadText.slice(i, i + chunkSize);
-
-    await jsonpCall_('__chunkAppend', {
-      key,
-      chunk
-    });
-  }
-
-  return await jsonpCall_('__chunkFinish', { key });
-}
+let ACCOUNT_CACHE = [];
+let SELECTED_MEMBERS = [];
+let AUTO_REFRESH_TIMER = null;
+let EDITING_MA_PHIEU = '';
+let IS_BUSY = false;
+let IS_BOOTING = false;
 
 
 /****************************************************
- * INIT
+ * BOOT
  ****************************************************/
 
 window.onload = function () {
@@ -158,6 +53,26 @@ function bindGlobalEvents() {
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
       closePreview();
+      return;
+    }
+
+    const loginPage = document.getElementById('loginPage');
+    const isLoginVisible = loginPage && !loginPage.classList.contains('hidden');
+
+    if (isLoginVisible && e.key === 'Enter') {
+      const target = e.target;
+
+      if (
+        target &&
+        (
+          target.id === 'loginUsername' ||
+          target.id === 'loginPassword' ||
+          target.closest('.login-card')
+        )
+      ) {
+        e.preventDefault();
+        doLogin();
+      }
     }
   });
 
@@ -176,11 +91,21 @@ function bindGlobalEvents() {
   });
 }
 
+function loginKeydown(e) {
+  if (!e) return;
+
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    doLogin();
+  }
+}
+
 function initLoginRememberCheckbox() {
   const remember = document.getElementById('rememberLogin');
   if (!remember) return;
 
-  remember.checked = true;
+  const saved = loadSavedSession();
+  remember.checked = !!(saved && saved.token);
 }
 
 async function bootApp() {
@@ -190,12 +115,11 @@ async function bootApp() {
   const appPage = document.getElementById('appPage');
   const msg = document.getElementById('loginMsg');
 
-  if (loginPage) loginPage.classList.remove('hidden');
-  if (appPage) appPage.classList.add('hidden');
-
   const saved = loadSavedSession();
 
   if (!saved || !saved.token) {
+    if (loginPage) loginPage.classList.remove('hidden');
+    if (appPage) appPage.classList.add('hidden');
     IS_BOOTING = false;
     return;
   }
@@ -203,7 +127,13 @@ async function bootApp() {
   TOKEN = saved.token;
   CURRENT_USER = saved.user || null;
 
-  if (msg) msg.innerText = 'Đang khôi phục đăng nhập...';
+  if (loginPage) loginPage.classList.add('hidden');
+  if (appPage) appPage.classList.remove('hidden');
+
+  if (CURRENT_USER) {
+    renderUserBox();
+    setupRoleUI();
+  }
 
   try {
     const data = await api('getAppData', { token: TOKEN });
@@ -214,13 +144,16 @@ async function bootApp() {
     if (msg) msg.innerText = '';
   } catch (err) {
     clearSavedSession();
+
     TOKEN = '';
     CURRENT_USER = null;
 
-    if (loginPage) loginPage.classList.remove('hidden');
     if (appPage) appPage.classList.add('hidden');
+    if (loginPage) loginPage.classList.remove('hidden');
 
-    if (msg) msg.innerText = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+    if (msg) {
+      msg.innerText = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+    }
   } finally {
     IS_BOOTING = false;
   }
@@ -228,8 +161,124 @@ async function bootApp() {
 
 
 /****************************************************
- * SESSION STORAGE
+ * API JSONP
  ****************************************************/
+
+function api(action, data = {}) {
+  const payload = {
+    action,
+    data
+  };
+
+  const text = JSON.stringify(payload);
+
+  if (text.length <= JSONP_DIRECT_LIMIT) {
+    return apiJsonpDirect_(payload);
+  }
+
+  return apiJsonpChunk_(payload);
+}
+
+function apiJsonpDirect_(payload) {
+  return new Promise((resolve, reject) => {
+    const callbackName = '__egreen_cb_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const script = document.createElement('script');
+
+    let finished = false;
+
+    window[callbackName] = function (res) {
+      if (finished) return;
+      finished = true;
+
+      cleanupJsonp_(script, callbackName);
+
+      if (!res || res.success === false) {
+        reject(new Error((res && res.message) || 'Không gọi được Apps Script API.'));
+        return;
+      }
+
+      resolve(res.data);
+    };
+
+    script.onerror = function () {
+      if (finished) return;
+      finished = true;
+
+      cleanupJsonp_(script, callbackName);
+      reject(new Error('Không gọi được Apps Script API. Kiểm tra API_URL hoặc quyền Web App.'));
+    };
+
+    const url =
+      API_URL +
+      '?callback=' + encodeURIComponent(callbackName) +
+      '&payload=' + encodeURIComponent(JSON.stringify(payload)) +
+      '&_=' + Date.now();
+
+    script.src = url;
+    document.body.appendChild(script);
+
+    setTimeout(() => {
+      if (finished) return;
+      finished = true;
+
+      cleanupJsonp_(script, callbackName);
+      reject(new Error('API phản hồi quá lâu. Vui lòng thử lại.'));
+    }, 45000);
+  });
+}
+
+async function apiJsonpChunk_(payload) {
+  const key = 'chunk_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  const text = JSON.stringify(payload);
+
+  await apiJsonpDirect_({
+    action: '__chunkStart',
+    data: { key }
+  });
+
+  for (let i = 0; i < text.length; i += JSONP_CHUNK_SIZE) {
+    await apiJsonpDirect_({
+      action: '__chunkAppend',
+      data: {
+        key,
+        chunk: text.slice(i, i + JSONP_CHUNK_SIZE)
+      }
+    });
+  }
+
+  return apiJsonpDirect_({
+    action: '__chunkFinish',
+    data: { key }
+  });
+}
+
+function cleanupJsonp_(script, callbackName) {
+  try {
+    if (script && script.parentNode) script.parentNode.removeChild(script);
+  } catch (e) {}
+
+  try {
+    delete window[callbackName];
+  } catch (e) {
+    window[callbackName] = undefined;
+  }
+}
+
+
+/****************************************************
+ * SESSION / LOGIN
+ ****************************************************/
+
+function loadSavedSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
 
 function saveSession() {
   if (!TOKEN || !CURRENT_USER) return;
@@ -253,120 +302,11 @@ function saveSession() {
   } catch (e) {}
 }
 
-function loadSavedSession() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-
-    return JSON.parse(raw);
-  } catch (e) {
-    return null;
-  }
-}
-
 function clearSavedSession() {
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch (e) {}
 }
-
-
-/****************************************************
- * BUSY / AUTO REFRESH
- ****************************************************/
-
-function pauseAutoRefresh() {
-  if (AUTO_REFRESH_TIMER) {
-    clearInterval(AUTO_REFRESH_TIMER);
-    AUTO_REFRESH_TIMER = null;
-  }
-}
-
-function resumeAutoRefresh() {
-  if (!TOKEN) return;
-  if (AUTO_REFRESH_TIMER) return;
-
-  startAutoRefresh();
-}
-
-function setBusy(isBusy, message) {
-  IS_BUSY = isBusy;
-
-  const buttons = document.querySelectorAll('button');
-
-  buttons.forEach(btn => {
-    if (btn.classList.contains('nav')) return;
-
-    btn.disabled = isBusy;
-    btn.style.opacity = isBusy ? '0.65' : '';
-    btn.style.cursor = isBusy ? 'not-allowed' : '';
-  });
-
-  const saveBtn = document.getElementById('saveBtn');
-
-  if (saveBtn) {
-    if (isBusy) {
-      if (!saveBtn.dataset.oldText) saveBtn.dataset.oldText = saveBtn.innerText;
-      saveBtn.innerText = message || 'Đang xử lý...';
-    } else if (saveBtn.dataset.oldText) {
-      saveBtn.innerText = saveBtn.dataset.oldText;
-      delete saveBtn.dataset.oldText;
-    }
-  }
-
-  const cancelEditBtn = document.getElementById('cancelEditBtn');
-  if (!isBusy && cancelEditBtn) {
-    cancelEditBtn.disabled = false;
-  }
-}
-
-async function runBusy(message, taskFn) {
-  if (IS_BUSY) return;
-
-  pauseAutoRefresh();
-  setBusy(true, message);
-
-  try {
-    return await taskFn();
-  } finally {
-    setBusy(false);
-    resumeAutoRefresh();
-  }
-}
-
-function startAutoRefresh() {
-  if (AUTO_REFRESH_TIMER) {
-    clearInterval(AUTO_REFRESH_TIMER);
-  }
-
-  AUTO_REFRESH_TIMER = setInterval(() => {
-    if (!TOKEN) return;
-    if (IS_BUSY) return;
-    if (IS_BOOTING) return;
-    if (document.hidden) return;
-
-    if (LAST_ACTIVE_TAB === 'formTab') {
-      loadApp(true);
-      return;
-    }
-
-    if (LAST_ACTIVE_TAB === 'historyTab') {
-      loadPhieuList(true);
-      return;
-    }
-
-    if (LAST_ACTIVE_TAB === 'adminTab') {
-      if (CURRENT_USER && CURRENT_USER.role === 'admin') {
-        loadAccounts(true);
-      }
-    }
-  }, AUTO_REFRESH_MS);
-}
-
-
-/****************************************************
- * LOGIN / LOGOUT
- ****************************************************/
 
 async function doLogin() {
   const username = getValue('loginUsername').trim();
@@ -378,6 +318,8 @@ async function doLogin() {
     if (msg) msg.innerText = 'Vui lòng nhập đủ tên đăng nhập và mật khẩu.';
     return;
   }
+
+  if (IS_BUSY) return;
 
   if (msg) msg.innerText = 'Đang đăng nhập...';
   if (loginBtn) loginBtn.disabled = true;
@@ -407,76 +349,47 @@ async function doLogin() {
 }
 
 async function doLogout() {
-  pauseAutoRefresh();
-
-  if (TOKEN) {
-    try {
+  try {
+    if (TOKEN) {
       await api('logout', { token: TOKEN });
-    } catch (e) {}
-  }
+    }
+  } catch (e) {}
 
-  clearSavedSession();
+  stopAutoRefresh();
 
   TOKEN = '';
   CURRENT_USER = null;
   ACCOUNT_CACHE = [];
   SELECTED_MEMBERS = [];
   EDITING_MA_PHIEU = '';
-  LAST_ACTIVE_TAB = 'formTab';
 
-  APP = {
-    may: [],
-    hienTuong: [],
-    vatTu: [],
-    ktv: [],
-    vatTuCoDinh: [],
-    selected: []
-  };
+  clearSavedSession();
 
-  const appPage = document.getElementById('appPage');
   const loginPage = document.getElementById('loginPage');
+  const appPage = document.getElementById('appPage');
+  const msg = document.getElementById('loginMsg');
 
   if (appPage) appPage.classList.add('hidden');
   if (loginPage) loginPage.classList.remove('hidden');
-
-  setInputValue('loginUsername', '');
-  setInputValue('loginPassword', '');
-
-  const msg = document.getElementById('loginMsg');
   if (msg) msg.innerText = '';
 
-  const firstNav = document.querySelector('.nav');
-  showTabById('formTab');
+  setValue('loginPassword', '');
 }
 
 
 /****************************************************
- * LOAD APP DATA
+ * INIT APP
  ****************************************************/
 
-async function loadApp(isAutoRefresh) {
-  if (!TOKEN) return;
-
-  try {
-    const data = await api('getAppData', { token: TOKEN });
-
-    if (isAutoRefresh) {
-      refreshAppDataOnly(data);
-    } else {
-      initApp(data);
-    }
-  } catch (err) {
-    if (!isAutoRefresh) {
-      alert(err.message);
-    }
-  }
-}
-
 function initApp(data) {
-  APP = { ...APP, ...data };
-  CURRENT_USER = data.currentUser || CURRENT_USER;
+  APP.may = Array.isArray(data.may) ? data.may : [];
+  APP.hienTuong = Array.isArray(data.hienTuong) ? data.hienTuong : [];
+  APP.vatTu = Array.isArray(data.vatTu) ? data.vatTu : [];
+  APP.ktv = Array.isArray(data.ktv) ? data.ktv : [];
+  APP.vatTuCoDinh = Array.isArray(data.vatTuCoDinh) ? data.vatTuCoDinh : [];
+  APP.selected = [];
 
-  saveSession();
+  CURRENT_USER = data.currentUser || CURRENT_USER;
 
   const loginPage = document.getElementById('loginPage');
   const appPage = document.getElementById('appPage');
@@ -484,261 +397,317 @@ function initApp(data) {
   if (loginPage) loginPage.classList.add('hidden');
   if (appPage) appPage.classList.remove('hidden');
 
-  const userBox = document.getElementById('userBox');
-  if (userBox && CURRENT_USER) {
-    userBox.innerHTML = `
-      <b>${escapeHtml(CURRENT_USER.fullName || CURRENT_USER.username)}</b><br>
-      Vai trò: ${escapeHtml(CURRENT_USER.role)}
-    `;
-  }
+  renderUserBox();
+  setupRoleUI();
 
-  const adminNav = document.getElementById('adminNav');
-
-  if (CURRENT_USER && CURRENT_USER.role === 'admin') {
-    if (adminNav) adminNav.classList.remove('hidden');
-    loadAccounts(false);
-  } else {
-    if (adminNav) adminNav.classList.add('hidden');
-  }
-
-  reloadSelectOptionsFromAppData();
-
-  SELECTED_MEMBERS = [];
-  renderMemberMultiSelect();
+  fillKtvSelects();
+  fillMachineSelect();
+  fillHienTuongSelect();
 
   setDefaultDateTime();
-  onMayChange();
+  resetSelectedMaterials();
+  renderSelectedItems();
 
-  renderVatTuCoDinh();
-  loadPhieuList(false);
-}
+  showFirstAvailableTab();
 
-function refreshAppDataOnly(data) {
-  const oldDoiTruong = getValue('doiTruong');
-  const oldMembers = [...SELECTED_MEMBERS];
-  const oldMaMay = getValue('maMay');
-  const oldHienTuong = getValue('hienTuong');
-  const oldNguoiXuatKho = getValue('nguoiXuatKho');
-  const oldNguoiNhapKho = getValue('nguoiNhapKho');
-  const oldSearch = getValue('searchVatTu');
+  loadPhieuList(true);
 
-  APP = { ...APP, ...data };
-  CURRENT_USER = data.currentUser || CURRENT_USER;
-
-  saveSession();
-
-  reloadSelectOptionsFromAppData();
-
-  setSelectValue('doiTruong', oldDoiTruong);
-  SELECTED_MEMBERS = oldMembers.filter(name => name !== getValue('doiTruong'));
-  renderMemberMultiSelect();
-
-  setSelectValue('maMay', oldMaMay);
-  setSelectValue('hienTuong', oldHienTuong);
-  setSelectValue('nguoiXuatKho', oldNguoiXuatKho);
-  setSelectValue('nguoiNhapKho', oldNguoiNhapKho);
-  setInputValue('searchVatTu', oldSearch);
-
-  onMayChange();
-  renderVatTuSearch();
-}
-
-function reloadSelectOptionsFromAppData() {
-  const names = getKtvNames();
-
-  fillSelect('doiTruong', names, '-- Chọn đội trưởng --');
-  fillSelect('nguoiXuatKho', names, '-- Chọn người xuất kho --');
-  fillSelect('nguoiNhapKho', names, '-- Chọn người nhập kho --');
-  fillSelect('maMay', getMayCodes(), '-- Chọn mã máy --');
-
-  const hienTuongList = [
-    ...new Set(
-      APP.hienTuong
-        .map(x => getValClient(x, ['Hiện Tượng/Sự cố', 'Hiện tượng/Sự cố', 'Hiện tượng']))
-        .filter(Boolean)
-        .map(x => String(x).trim())
-    )
-  ];
-
-  fillSelect('hienTuong', hienTuongList, '-- Chọn hiện tượng --');
-}
-
-
-/****************************************************
- * TAB
- ****************************************************/
-
-function showTab(id, btn) {
-  LAST_ACTIVE_TAB = id;
-
-  document.querySelectorAll('.tab').forEach(x => x.classList.add('hidden'));
-
-  const tab = document.getElementById(id);
-  if (tab) tab.classList.remove('hidden');
-
-  document.querySelectorAll('.nav').forEach(x => x.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-
-  if (id === 'adminTab') {
-    loadAccounts(false);
-  }
-
-  if (id === 'historyTab') {
-    loadPhieuList(false);
+  if (CURRENT_USER && CURRENT_USER.role === 'admin') {
+    loadAccounts();
   }
 }
 
-function showTabById(id) {
-  const btn = Array.from(document.querySelectorAll('.nav')).find(b => {
-    return b.getAttribute('onclick') && b.getAttribute('onclick').includes(id);
-  });
+function renderUserBox() {
+  const userBox = document.getElementById('userBox');
+  if (!userBox || !CURRENT_USER) return;
 
-  showTab(id, btn);
+  userBox.innerHTML = `
+    <b>${escapeHtml(CURRENT_USER.fullName || CURRENT_USER.username)}</b><br>
+    Vai trò: ${escapeHtml(CURRENT_USER.role || '')}
+  `;
 }
 
+function setupRoleUI() {
+  const adminNav = document.getElementById('adminNav');
 
-/****************************************************
- * SELECT / DATA HELPERS
- ****************************************************/
+  if (!adminNav || !CURRENT_USER) return;
 
-function normKeyClient(s) {
-  return String(s || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/\s+/g, ' ');
+  if (CURRENT_USER.role === 'admin') {
+    adminNav.classList.remove('hidden');
+  } else {
+    adminNav.classList.add('hidden');
+  }
 }
 
-function getValClient(row, keys) {
-  if (!row) return '';
+function showFirstAvailableTab() {
+  const active = document.querySelector('.nav.active');
 
-  const normKeys = keys.map(normKeyClient);
-
-  for (const k in row) {
-    if (normKeys.includes(normKeyClient(k))) {
-      return row[k];
+  if (active) {
+    const text = active.textContent || '';
+    if (text.includes('Phiếu đã tạo')) {
+      showTab('historyTab', active);
+      return;
     }
   }
 
-  return '';
+  const firstNav = document.querySelector('.nav');
+  showTab('formTab', firstNav);
 }
 
-function getKtvNames() {
-  const list = APP.ktv
-    .map(row => {
-      return getValClient(row, [
-        'Họ Và Tên',
-        'Họ và tên',
-        'Họ tên',
-        'Tên kỹ thuật',
-        'Tên kỹ thuật viên',
-        'Kỹ thuật viên',
-        'Tên KTV',
-        'Tên'
-      ]);
-    })
-    .filter(Boolean)
-    .map(x => String(x).trim())
-    .filter(x => x && isNaN(Number(x)));
+function startAutoRefresh() {
+  stopAutoRefresh();
 
-  return [...new Set(list)];
+  AUTO_REFRESH_TIMER = setInterval(async () => {
+    if (!TOKEN || IS_BUSY || IS_BOOTING) return;
+
+    try {
+      await silentRefreshData();
+    } catch (e) {
+      console.warn('Auto refresh failed:', e.message);
+    }
+  }, AUTO_REFRESH_MS);
 }
 
-function getMayCodes() {
-  return APP.may
-    .map(x => getValClient(x, ['Mã Máy', 'Mã máy']))
-    .filter(Boolean)
-    .map(x => String(x).trim());
-}
-
-function fillSelect(id, arr, placeholder) {
-  const el = document.getElementById(id);
-  if (!el) return;
-
-  let html = '';
-
-  if (placeholder) {
-    html += `<option value="">${escapeHtml(placeholder)}</option>`;
-  }
-
-  html += arr
-    .map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)
-    .join('');
-
-  el.innerHTML = html;
-}
-
-function setSelectValue(id, value) {
-  const el = document.getElementById(id);
-  if (!el) return;
-
-  if (value && Array.from(el.options).some(o => o.value === value)) {
-    el.value = value;
-  } else {
-    el.value = '';
+function stopAutoRefresh() {
+  if (AUTO_REFRESH_TIMER) {
+    clearInterval(AUTO_REFRESH_TIMER);
+    AUTO_REFRESH_TIMER = null;
   }
 }
 
-function getValue(id) {
-  const el = document.getElementById(id);
-  return el ? el.value : '';
-}
+async function silentRefreshData() {
+  const data = await api('getAppData', { token: TOKEN });
 
-function setInputValue(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.value = value || '';
-}
+  APP.may = Array.isArray(data.may) ? data.may : [];
+  APP.hienTuong = Array.isArray(data.hienTuong) ? data.hienTuong : [];
+  APP.vatTu = Array.isArray(data.vatTu) ? data.vatTu : [];
+  APP.ktv = Array.isArray(data.ktv) ? data.ktv : [];
+  APP.vatTuCoDinh = Array.isArray(data.vatTuCoDinh) ? data.vatTuCoDinh : [];
 
-function setText(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.innerText = value || '';
+  const oldUser = CURRENT_USER;
+  CURRENT_USER = data.currentUser || CURRENT_USER;
+
+  if (!oldUser || JSON.stringify(oldUser) !== JSON.stringify(CURRENT_USER)) {
+    renderUserBox();
+    setupRoleUI();
+    saveSession();
+  }
+
+  fillKtvSelects(true);
+  fillMachineSelect(true);
+  fillHienTuongSelect(true);
+  renderVatTuSearch();
+  renderSelectedItems();
+
+  const historyTab = document.getElementById('historyTab');
+  if (historyTab && !historyTab.classList.contains('hidden')) {
+    await loadPhieuList(true);
+  }
+
+  const adminTab = document.getElementById('adminTab');
+  if (CURRENT_USER && CURRENT_USER.role === 'admin' && adminTab && !adminTab.classList.contains('hidden')) {
+    await loadAccounts(true);
+  }
 }
 
 
 /****************************************************
- * FORM
+ * TABS
  ****************************************************/
 
-function setDefaultDateTime() {
-  const now = new Date();
-  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+function showTab(tabId, btn) {
+  document.querySelectorAll('.tab').forEach(x => x.classList.add('hidden'));
+  document.querySelectorAll('.nav').forEach(x => x.classList.remove('active'));
 
-  const el = document.getElementById('ngayGioXuatKho');
-  if (el && !el.value) el.value = now.toISOString().slice(0, 16);
+  const tab = document.getElementById(tabId);
+  if (tab) tab.classList.remove('hidden');
+
+  if (btn) btn.classList.add('active');
+
+  if (tabId === 'historyTab') {
+    loadPhieuList(true);
+  }
+
+  if (tabId === 'adminTab') {
+    loadAccounts(true);
+  }
+}
+
+
+/****************************************************
+ * SELECT DATA
+ ****************************************************/
+
+function fillKtvSelects(keepValue) {
+  const names = getKtvNames();
+
+  fillSelect('doiTruong', names, '-- Chọn đội trưởng --', keepValue);
+  fillSelect('nguoiXuatKho', names, '-- Chọn người xuất kho --', keepValue);
+  fillSelect('nguoiNhapKho', names, '-- Chọn người nhập kho --', keepValue);
+
+  renderMemberDropdown();
+}
+
+function getKtvNames() {
+  const names = APP.ktv
+    .map(x => getObjValue(x, ['Họ Và Tên', 'Họ và tên', 'Tên kỹ thuật', 'Tên', 'Ho Va Ten']))
+    .filter(Boolean)
+    .map(x => String(x).trim())
+    .filter(Boolean);
+
+  return uniqueArray(names);
+}
+
+function fillMachineSelect(keepValue) {
+  const select = document.getElementById('maMay');
+  if (!select) return;
+
+  const oldValue = keepValue ? select.value : '';
+
+  select.innerHTML = '<option value="">-- Chọn mã máy --</option>';
+
+  APP.may.forEach(m => {
+    const maMay = getMayCode(m);
+    if (!maMay) return;
+
+    const opt = document.createElement('option');
+    opt.value = maMay;
+    opt.textContent = maMay;
+    select.appendChild(opt);
+  });
+
+  if (keepValue && oldValue) select.value = oldValue;
+}
+
+function fillHienTuongSelect(keepValue) {
+  const select = document.getElementById('hienTuong');
+  if (!select) return;
+
+  const oldValue = keepValue ? select.value : '';
+
+  select.innerHTML = '<option value="">-- Chọn hiện tượng --</option>';
+
+  const list = APP.hienTuong
+    .map(x => getObjValue(x, ['Hiện tượng/Sự cố', 'Hiện tượng', 'Hien tuong', 'Sự cố', 'Lỗi']))
+    .filter(Boolean);
+
+  uniqueArray(list).forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    select.appendChild(opt);
+  });
+
+  if (keepValue && oldValue) select.value = oldValue;
+}
+
+function fillSelect(id, values, placeholder, keepValue) {
+  const select = document.getElementById(id);
+  if (!select) return;
+
+  const oldValue = keepValue ? select.value : '';
+
+  select.innerHTML = '';
+
+  const emptyOpt = document.createElement('option');
+  emptyOpt.value = '';
+  emptyOpt.textContent = placeholder || '-- Chọn --';
+  select.appendChild(emptyOpt);
+
+  values.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v;
+    select.appendChild(opt);
+  });
+
+  if (keepValue && oldValue) {
+    select.value = oldValue;
+  }
+}
+
+function onDoiTruongChange() {
+  const doiTruong = getValue('doiTruong');
+
+  SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== doiTruong);
+
+  renderMemberDropdown();
+  renderMemberText();
+}
+
+function toggleMemberDropdown() {
+  const dropdown = document.getElementById('thanhVienDropdown');
+  if (!dropdown) return;
+
+  dropdown.classList.toggle('hidden');
+  renderMemberDropdown();
+}
+
+function renderMemberDropdown() {
+  const dropdown = document.getElementById('thanhVienDropdown');
+  if (!dropdown) return;
+
+  const doiTruong = getValue('doiTruong');
+  const names = getKtvNames().filter(x => x !== doiTruong);
+
+  if (!names.length) {
+    dropdown.innerHTML = '<div class="multi-option">Không có thành viên để chọn.</div>';
+    renderMemberText();
+    return;
+  }
+
+  dropdown.innerHTML = names.map(name => {
+    const checked = SELECTED_MEMBERS.includes(name) ? 'checked' : '';
+
+    return `
+      <label class="multi-option">
+        <input type="checkbox" ${checked} onchange="toggleMember('${escapeJs(name)}', this.checked)">
+        <span>${escapeHtml(name)}</span>
+      </label>
+    `;
+  }).join('');
+
+  renderMemberText();
+}
+
+function toggleMember(name, checked) {
+  if (checked) {
+    if (!SELECTED_MEMBERS.includes(name)) SELECTED_MEMBERS.push(name);
+  } else {
+    SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== name);
+  }
+
+  renderMemberText();
+}
+
+function renderMemberText() {
+  const text = document.getElementById('thanhVienText');
+  if (!text) return;
+
+  if (!SELECTED_MEMBERS.length) {
+    text.textContent = 'Chọn thành viên';
+    return;
+  }
+
+  text.textContent = SELECTED_MEMBERS.join('; ');
 }
 
 function onMayChange() {
   const maMay = getValue('maMay');
+  const may = APP.may.find(x => getMayCode(x) === maMay);
 
-  const m = APP.may.find(x =>
-    String(getValClient(x, ['Mã Máy', 'Mã máy'])).trim() === String(maMay).trim()
-  ) || {};
+  setText('tenTrai', may ? getObjValue(may, ['Tên trại', 'Ten trai', 'Trại', 'Địa chỉ trại']) : '');
+  setText('donVi', may ? getObjValue(may, ['Đơn vị', 'Don vi']) : '');
+  setText('khuVuc', may ? getObjValue(may, ['Khu vực', 'Khu Vực', 'Khu vuc']) : '');
+  setText('tinhTP', may ? getObjValue(may, ['Tỉnh/TP', 'Tinh/TP', 'Tỉnh TP', 'Tỉnh']) : '');
+}
 
-  setText(
-    'tenTrai',
-    getValClient(m, ['Tên Trang Trại / Đơn Vị', 'Tên trại', 'Tên Trang Trại']) || ''
-  );
-
-  setText(
-    'donVi',
-    getValClient(m, ['Đơn vị hợp tác', 'Đơn vị']) || ''
-  );
-
-  setText(
-    'khuVuc',
-    getValClient(m, ['Khu Vực', 'Khu vực']) || ''
-  );
-
-  setText(
-    'tinhTP',
-    getValClient(m, ['Tỉnh Thành', 'Tỉnh / TP', 'Tỉnh/TP']) || ''
-  );
+function getMayCode(obj) {
+  return String(getObjValue(obj, ['Mã máy', 'Ma may', 'Mã Máy', 'Code', 'Mã']) || '').trim();
 }
 
 function onMucDichChange() {
-  const mucDich = getMucDich();
+  const mucDich = getRadioValue('mucDich');
 
   const boxHienTuong = document.getElementById('boxHienTuong');
   const boxCuThe = document.getElementById('boxCuThe');
@@ -754,361 +723,159 @@ function onMucDichChange() {
   renderVatTuSearch();
 }
 
-function getMucDich() {
-  const checked = document.querySelector('input[name="mucDich"]:checked');
-  return checked ? checked.value : 'Bảo dưỡng sửa chữa';
-}
-
-function buildCurrentPayload() {
-  const mucDich = getMucDich();
-  const maMay = getValue('maMay');
-
-  const m = APP.may.find(x =>
-    String(getValClient(x, ['Mã Máy', 'Mã máy'])).trim() === String(maMay).trim()
-  ) || {};
-
-  const cuThe = mucDich === 'Bảo dưỡng sửa chữa'
-    ? getValue('hienTuong')
-    : getValue('cuTheNhapTay').trim();
-
-  return {
-    maPhieu: EDITING_MA_PHIEU || '',
-    doiTruong: getValue('doiTruong'),
-    thanhVien: [...SELECTED_MEMBERS],
-    maMay,
-    tenTrai: getValClient(m, ['Tên Trang Trại / Đơn Vị', 'Tên trại', 'Tên Trang Trại']) || '',
-    donVi: getValClient(m, ['Đơn vị hợp tác', 'Đơn vị']) || '',
-    khuVuc: getValClient(m, ['Khu Vực', 'Khu vực']) || '',
-    tinhTP: getValClient(m, ['Tỉnh Thành', 'Tỉnh / TP', 'Tỉnh/TP']) || '',
-    ngayGioXuatKho: getValue('ngayGioXuatKho'),
-    nguoiXuatKho: getValue('nguoiXuatKho'),
-    ngayGioNhapKho: getValue('ngayGioNhapKho'),
-    nguoiNhapKho: getValue('nguoiNhapKho'),
-    mucDich,
-    cuThe,
-    ghiChu: '',
-    items: APP.selected.map(x => ({
-      nguonVatTu: x.nguonVatTu || '',
-      cumLinhKien: x.cumLinhKien || '',
-      tenVatTu: x.tenVatTu || '',
-      maVatTu: x.maVatTu || '',
-      donViTinh: x.donViTinh || '',
-      soLuongCan: x.soLuongCan || '',
-      soLuongXuatKho: x.soLuongXuatKho || '',
-      tinhTrangXuatKho: x.tinhTrangXuatKho || '',
-      soLuongSuDung: x.soLuongSuDung || '',
-      soLuongNhapKho: x.soLuongNhapKho || '',
-      tinhTrangNhapKho: x.tinhTrangNhapKho || '',
-      ghiChu: x.ghiChu || ''
-    }))
-  };
-}
-
-function validatePayloadBeforeSave(payload) {
-  if (!payload.doiTruong) return 'Chưa chọn đội trưởng.';
-  if (!payload.thanhVien || !payload.thanhVien.length) return 'Chưa chọn thành viên.';
-  if (!payload.maMay) return 'Chưa chọn mã máy.';
-  if (!payload.ngayGioXuatKho) return 'Chưa chọn ngày giờ xuất kho.';
-  if (!payload.nguoiXuatKho) return 'Chưa chọn thành viên xuất kho.';
-  if (!payload.mucDich) return 'Chưa chọn mục đích sử dụng vật tư.';
-  if (!payload.cuThe) return 'Chưa nhập/chọn nội dung cụ thể.';
-  if (!payload.items || !payload.items.length) return 'Chưa có vật tư trong danh sách.';
-
-  return '';
-}
-
-async function save() {
-  return runBusy(EDITING_MA_PHIEU ? 'Đang cập nhật phiếu...' : 'Đang lưu phiếu...', async () => {
-    const payload = buildCurrentPayload();
-    const invalid = validatePayloadBeforeSave(payload);
-
-    if (invalid) {
-      alert(invalid);
-      return;
-    }
-
-    try {
-      let res;
-
-      if (EDITING_MA_PHIEU) {
-        res = await api('updatePhieu', {
-          token: TOKEN,
-          maPhieu: EDITING_MA_PHIEU,
-          payload
-        });
-
-        alert('Đã cập nhật phiếu: ' + res.maPhieu);
-      } else {
-        res = await api('savePhieu', {
-          token: TOKEN,
-          payload
-        });
-
-        alert('Đã lưu phiếu: ' + res.maPhieu);
-      }
-
-      await loadPhieuList(false);
-      showTabById('historyTab');
-      resetFormAfterSave();
-
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-}
-
-function resetFormAfterSave() {
-  EDITING_MA_PHIEU = '';
-
-  setText('formTitle', 'Phiếu chuẩn bị vật tư');
-
-  const saveBtn = document.getElementById('saveBtn');
-  if (saveBtn) saveBtn.innerText = 'Lưu phiếu';
-
-  const cancelEditBtn = document.getElementById('cancelEditBtn');
-  if (cancelEditBtn) cancelEditBtn.classList.add('hidden');
-
-  setSelectValue('doiTruong', '');
-
-  SELECTED_MEMBERS = [];
-  renderMemberMultiSelect();
-
-  setSelectValue('maMay', '');
-  onMayChange();
-
-  setSelectValue('nguoiXuatKho', '');
-  setSelectValue('nguoiNhapKho', '');
-
-  setInputValue('ngayGioNhapKho', '');
-  setInputValue('ngayGioXuatKho', '');
-  setDefaultDateTime();
-
-  const defaultMucDich = document.querySelector('input[name="mucDich"][value="Bảo dưỡng sửa chữa"]');
-  if (defaultMucDich) defaultMucDich.checked = true;
-
-  setSelectValue('hienTuong', '');
-  setInputValue('cuTheNhapTay', '');
-  setInputValue('searchVatTu', '');
-
-  onMucDichChange();
-
-  renderVatTuCoDinh();
-}
-
-function cancelEdit() {
-  resetFormAfterSave();
+function setDefaultDateTime() {
+  const now = new Date();
+  setValue('ngayGioXuatKho', toDatetimeLocalValue(now));
 }
 
 
 /****************************************************
- * MEMBER MULTI SELECT
+ * MATERIALS
  ****************************************************/
 
-function toggleMemberDropdown() {
-  const dropdown = document.getElementById('thanhVienDropdown');
-  if (dropdown) dropdown.classList.toggle('hidden');
-}
-
-function getAvailableMembers() {
-  const doiTruong = getValue('doiTruong');
-  return getKtvNames().filter(name => name !== doiTruong);
-}
-
-function renderMemberMultiSelect() {
-  const dropdown = document.getElementById('thanhVienDropdown');
-  if (!dropdown) return;
-
-  const available = getAvailableMembers();
-
-  SELECTED_MEMBERS = SELECTED_MEMBERS.filter(name => available.includes(name));
-
-  dropdown.innerHTML = available.map(name => {
-    const checked = SELECTED_MEMBERS.includes(name) ? 'checked' : '';
-
-    return `
-      <label class="multi-option">
-        <input type="checkbox" value="${escapeHtml(name)}" ${checked} onchange="onMemberCheckboxChange(this)">
-        <span>${escapeHtml(name)}</span>
-      </label>
-    `;
-  }).join('');
-
-  updateMemberText();
-}
-
-function onMemberCheckboxChange(cb) {
-  const name = cb.value;
-
-  if (cb.checked) {
-    if (!SELECTED_MEMBERS.includes(name)) {
-      SELECTED_MEMBERS.push(name);
-    }
-  } else {
-    SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== name);
-  }
-
-  updateMemberText();
-}
-
-function updateMemberText() {
-  const text = document.getElementById('thanhVienText');
-  if (!text) return;
-
-  if (!SELECTED_MEMBERS.length) {
-    text.innerText = 'Chọn thành viên';
-  } else if (SELECTED_MEMBERS.length <= 2) {
-    text.innerText = SELECTED_MEMBERS.join(', ');
-  } else {
-    text.innerText = SELECTED_MEMBERS.length + ' thành viên đã chọn';
-  }
-}
-
-function onDoiTruongChange() {
-  const doiTruong = getValue('doiTruong');
-
-  SELECTED_MEMBERS = SELECTED_MEMBERS.filter(name => name !== doiTruong);
-
-  renderMemberMultiSelect();
-}
-
-
-/****************************************************
- * VAT TU
- ****************************************************/
-
-function renderVatTuCoDinh() {
+function resetSelectedMaterials() {
   APP.selected = [];
 
-  APP.vatTuCoDinh.forEach((v, i) => {
-    const ten = getValClient(v, [
-      'Tên Chi Tiết / Linh Kiện Thay Thế',
-      'Hạng mục vật tư',
-      'Tên vật tư'
-    ]);
+  const fixed = getFixedMaterials();
 
-    const cum = getValClient(v, ['Cụm Linh Kiện', 'Cụm linh kiện']);
-    const maVT = getValClient(v, ['Mã Vật Tư', 'Mã vật tư']);
-    const dvt = getValClient(v, ['Đơn vị tính', 'ĐVT']);
-
-    if (!ten) return;
-
-    APP.selected.push({
-      id: 'fixed_' + i + '_' + safeId(ten),
+  fixed.forEach(item => {
+    addOrUpdateSelected({
+      id: makeMaterialId(item),
       nguonVatTu: 'Cố định',
-      cumLinhKien: cum,
-      tenVatTu: ten,
-      maVatTu: maVT,
-      donViTinh: dvt,
-      soLuongCan: 1,
-      tinhTrangXuatKho: 'Mới',
-      ghiChu: ''
+      cumLinhKien: getCumLinhKien(item),
+      tenVatTu: getTenVatTu(item),
+      maVatTu: getObjValue(item, ['Mã vật tư', 'Ma vat tu']) || '',
+      donViTinh: getObjValue(item, ['ĐVT', 'Đơn vị tính', 'DVT']) || '',
+      soLuongCan: normalizeQty(getObjValue(item, ['Số lượng', 'SL', 'Số lượng cần']) || 1),
+      tinhTrangXuatKho: getObjValue(item, ['Tình trạng', 'Tinh trang']) || 'Mới',
+      ghiChu: getObjValue(item, ['Ghi chú', 'Ghi chu']) || '',
+      fixed: true
     });
   });
 
-  renderSelected();
   renderVatTuSearch();
+  renderSelectedItems();
 }
 
-function getRelatedCumByHienTuong() {
-  const mucDich = getMucDich();
+function getFixedMaterials() {
+  return APP.vatTuCoDinh.filter(x => getTenVatTu(x));
+}
 
-  if (mucDich !== 'Bảo dưỡng sửa chữa') return [];
+function getSelectableMaterials() {
+  const mucDich = getRadioValue('mucDich');
 
-  const ht = getValue('hienTuong');
-  if (!ht) return [];
+  if (mucDich !== 'Bảo dưỡng sửa chữa') {
+    return APP.vatTu.filter(x => getTenVatTu(x));
+  }
 
-  return APP.hienTuong
-    .filter(x => getValClient(x, ['Hiện Tượng/Sự cố', 'Hiện tượng/Sự cố', 'Hiện tượng']) === ht)
-    .map(x => getValClient(x, ['Cụm Linh Kiện Liên Quan', 'Cụm Linh Kiện', 'Cụm linh kiện']))
-    .filter(Boolean);
+  const hienTuong = getValue('hienTuong');
+
+  if (!hienTuong) {
+    return APP.vatTu.filter(x => getTenVatTu(x));
+  }
+
+  const relatedCums = getRelatedCumsByHienTuong(hienTuong);
+
+  if (!relatedCums.length) {
+    return APP.vatTu.filter(x => getTenVatTu(x));
+  }
+
+  const relatedNorms = relatedCums.map(normText);
+
+  return APP.vatTu.filter(x => {
+    const ten = getTenVatTu(x);
+    if (!ten) return false;
+
+    const cum = normText(getCumLinhKien(x));
+    return relatedNorms.includes(cum);
+  });
+}
+
+function getRelatedCumsByHienTuong(hienTuong) {
+  const htNorm = normText(hienTuong);
+
+  const rows = APP.hienTuong.filter(x => {
+    const name = getObjValue(x, ['Hiện tượng/Sự cố', 'Hiện tượng', 'Hien tuong', 'Sự cố', 'Lỗi']);
+    return normText(name) === htNorm;
+  });
+
+  const cums = [];
+
+  rows.forEach(row => {
+    [
+      'Cụm vật tư',
+      'Cụm Vật Tư',
+      'Cụm linh kiện',
+      'Cụm Linh Kiện',
+      'Cum linh kien',
+      'Hệ thống',
+      'Hệ Thống'
+    ].forEach(key => {
+      const val = row[key];
+      if (!val) return;
+
+      String(val)
+        .split(/[;,|]/)
+        .map(x => x.trim())
+        .filter(Boolean)
+        .forEach(x => cums.push(x));
+    });
+  });
+
+  return uniqueArray(cums);
 }
 
 function renderVatTuSearch() {
   const box = document.getElementById('vatTuSearchList');
-  const searchEl = document.getElementById('searchVatTu');
-
   if (!box) return;
 
-  const keyword = removeTone((searchEl && searchEl.value) || '').toLowerCase().trim();
-  const mucDich = getMucDich();
-  const cumLienQuan = getRelatedCumByHienTuong();
+  const keyword = normText(getValue('searchVatTu'));
+  let list = getSelectableMaterials();
 
-  const selectedNames = new Set(APP.selected.map(x => normalizeName(x.tenVatTu)));
+  const selectedIds = new Set(APP.selected.map(x => x.id));
 
-  const list = APP.vatTu.filter(v => {
-    const ten = getValClient(v, [
-      'Tên Chi Tiết / Linh Kiện Thay Thế',
-      'Hạng mục vật tư',
-      'Tên vật tư'
-    ]);
+  list = list.filter(item => {
+    const id = makeMaterialId(item);
+    if (selectedIds.has(id)) return false;
 
-    const cum = getValClient(v, ['Cụm Linh Kiện', 'Cụm linh kiện']);
+    if (!keyword) return true;
 
-    if (!ten) return false;
-    if (selectedNames.has(normalizeName(ten))) return false;
+    const haystack = normText([
+      getTenVatTu(item),
+      getCumLinhKien(item),
+      getObjValue(item, ['Mã vật tư', 'Ma vat tu']),
+      getObjValue(item, ['Ghi chú', 'Ghi chu'])
+    ].join(' '));
 
-    if (mucDich === 'Bảo dưỡng sửa chữa') {
-      const ht = getValue('hienTuong');
-
-      if (ht && cumLienQuan.length && !cumLienQuan.includes(cum)) return false;
-    }
-
-    if (keyword) {
-      const text = removeTone(ten + ' ' + cum).toLowerCase();
-      if (!text.includes(keyword)) return false;
-    }
-
-    return true;
+    return haystack.includes(keyword);
   });
 
-  box.classList.remove('hidden');
-
   if (!list.length) {
-    box.innerHTML = `
-      <div class="suggest-row suggest-empty">
-        <div></div>
-        <div>Không có vật tư phù hợp.</div>
-      </div>
-    `;
+    box.classList.remove('hidden');
+    box.innerHTML = '<div class="suggest-row suggest-empty">Không có vật tư phù hợp để chọn thêm.</div>';
     return;
   }
 
-  const groups = {};
+  const groups = groupBy(list, item => getCumLinhKien(item) || 'Khác');
 
-  list.forEach(v => {
-    const cum = getValClient(v, ['Cụm Linh Kiện', 'Cụm linh kiện']) || 'Khác';
+  box.classList.remove('hidden');
 
-    if (!groups[cum]) groups[cum] = [];
-    groups[cum].push(v);
-  });
-
-  box.innerHTML = Object.keys(groups).map(cum => {
-    const rows = groups[cum].map((v, i) => {
-      const ten = getValClient(v, [
-        'Tên Chi Tiết / Linh Kiện Thay Thế',
-        'Hạng mục vật tư',
-        'Tên vật tư'
-      ]);
-
-      const maVT = getValClient(v, ['Mã Vật Tư', 'Mã vật tư']);
-      const dvt = getValClient(v, ['Đơn vị tính', 'ĐVT']);
+  box.innerHTML = Object.keys(groups).sort().map(groupName => {
+    const rows = groups[groupName].map(item => {
+      const id = makeMaterialId(item);
+      const ten = getTenVatTu(item);
+      const maVatTu = getObjValue(item, ['Mã vật tư', 'Ma vat tu']) || '';
+      const dvt = getObjValue(item, ['ĐVT', 'Đơn vị tính', 'DVT']) || '';
 
       return `
         <div class="suggest-row">
-          <input type="checkbox" onchange="addVatTuFromSearch(this)"
-            data-ten="${escapeHtml(ten)}"
-            data-cum="${escapeHtml(cum)}"
-            data-mavt="${escapeHtml(maVT)}"
-            data-dvt="${escapeHtml(dvt)}">
-
+          <input type="checkbox" onchange="selectMaterialFromSearch('${escapeJs(id)}', this.checked)">
           <div>
             <b>${escapeHtml(ten)}</b><br>
-            <small>${escapeHtml(cum)}</small>
+            <small>${escapeHtml(groupName)}${maVatTu ? ' - ' + escapeHtml(maVatTu) : ''}${dvt ? ' - ĐVT: ' + escapeHtml(dvt) : ''}</small>
           </div>
-
-          <input type="number" min="0" value="1">
-
-          <select>
+          <input id="qty_search_${cssId(id)}" type="number" min="0" step="1" value="1">
+          <select id="status_search_${cssId(id)}">
             <option value="Mới">Mới</option>
             <option value="Cũ">Cũ</option>
             <option value="Tốt">Tốt</option>
@@ -1120,37 +887,83 @@ function renderVatTuSearch() {
 
     return `
       <div class="suggest-group">
-        <div class="suggest-group-title">${escapeHtml(cum)}</div>
+        <div class="suggest-group-title">${escapeHtml(groupName)}</div>
         ${rows}
       </div>
     `;
   }).join('');
 }
 
-function addVatTuFromSearch(cb) {
-  if (!cb.checked) return;
+function selectMaterialFromSearch(id, checked) {
+  if (!checked) return;
 
-  const row = cb.closest('.suggest-row');
-  const slInput = row ? row.querySelector('input[type="number"]') : null;
-  const ttSelect = row ? row.querySelector('select') : null;
+  const sourceItem = APP.vatTu.find(x => makeMaterialId(x) === id)
+    || APP.vatTuCoDinh.find(x => makeMaterialId(x) === id);
 
-  APP.selected.push({
-    id: 'add_' + Date.now() + '_' + safeId(cb.dataset.ten),
+  if (!sourceItem) return;
+
+  const qtyEl = document.getElementById('qty_search_' + cssId(id));
+  const statusEl = document.getElementById('status_search_' + cssId(id));
+
+  addOrUpdateSelected({
+    id,
     nguonVatTu: 'Chọn thêm',
-    cumLinhKien: cb.dataset.cum || '',
-    tenVatTu: cb.dataset.ten || '',
-    maVatTu: cb.dataset.mavt || '',
-    donViTinh: cb.dataset.dvt || '',
-    soLuongCan: slInput ? slInput.value || 1 : 1,
-    tinhTrangXuatKho: ttSelect ? ttSelect.value || 'Mới' : 'Mới',
-    ghiChu: ''
+    cumLinhKien: getCumLinhKien(sourceItem),
+    tenVatTu: getTenVatTu(sourceItem),
+    maVatTu: getObjValue(sourceItem, ['Mã vật tư', 'Ma vat tu']) || '',
+    donViTinh: getObjValue(sourceItem, ['ĐVT', 'Đơn vị tính', 'DVT']) || '',
+    soLuongCan: normalizeQty(qtyEl ? qtyEl.value : 1),
+    tinhTrangXuatKho: statusEl ? statusEl.value : 'Mới',
+    ghiChu: getObjValue(sourceItem, ['Ghi chú', 'Ghi chu']) || '',
+    fixed: false
   });
 
-  renderSelected();
   renderVatTuSearch();
+  renderSelectedItems();
 }
 
-function renderSelected() {
+function addOrUpdateSelected(item) {
+  const idx = APP.selected.findIndex(x => x.id === item.id);
+
+  if (idx >= 0) {
+    APP.selected[idx] = {
+      ...APP.selected[idx],
+      ...item
+    };
+  } else {
+    APP.selected.push(item);
+  }
+}
+
+function removeSelectedMaterial(id) {
+  const item = APP.selected.find(x => x.id === id);
+
+  if (item && item.fixed) {
+    alert('Vật tư cố định không nên bỏ chọn. Nếu vẫn không cần mang đi, có thể sửa số lượng về 0.');
+    return;
+  }
+
+  APP.selected = APP.selected.filter(x => x.id !== id);
+
+  renderVatTuSearch();
+  renderSelectedItems();
+}
+
+function updateSelectedQty(id, value) {
+  const item = APP.selected.find(x => x.id === id);
+  if (!item) return;
+
+  item.soLuongCan = normalizeQty(value);
+}
+
+function updateSelectedStatus(id, value) {
+  const item = APP.selected.find(x => x.id === id);
+  if (!item) return;
+
+  item.tinhTrangXuatKho = value;
+}
+
+function renderSelectedItems() {
   const box = document.getElementById('selectedItems');
   if (!box) return;
 
@@ -1159,64 +972,363 @@ function renderSelected() {
     return;
   }
 
-  box.innerHTML = APP.selected.map((x, i) => `
-    <div class="item-row">
-      <input type="checkbox" checked onchange="removeSelectedVatTu(${i})">
-      <div>
-        <b>${escapeHtml(x.tenVatTu)}</b><br>
-        <small>${escapeHtml(x.cumLinhKien)} - ${escapeHtml(x.nguonVatTu)}</small>
+  box.innerHTML = APP.selected.map(item => {
+    const id = item.id;
+    const removeBtn = item.fixed
+      ? '<small>Vật tư cố định</small>'
+      : `<button type="button" class="small-btn danger" onclick="removeSelectedMaterial('${escapeJs(id)}')">Bỏ</button>`;
+
+    return `
+      <div class="item-row">
+        <input type="checkbox" checked onchange="removeSelectedMaterial('${escapeJs(id)}')">
+        <div>
+          <b>${escapeHtml(item.tenVatTu)}</b><br>
+          <small>${escapeHtml(item.cumLinhKien || '')}${item.nguonVatTu ? ' - ' + escapeHtml(item.nguonVatTu) : ''}</small>
+        </div>
+        <input
+          type="number"
+          min="0"
+          step="1"
+          value="${escapeHtml(item.soLuongCan)}"
+          onchange="updateSelectedQty('${escapeJs(id)}', this.value)"
+        >
+        <select onchange="updateSelectedStatus('${escapeJs(id)}', this.value)">
+          ${statusOptions(item.tinhTrangXuatKho)}
+        </select>
+        <div>${removeBtn}</div>
       </div>
-      <input type="number" min="0" value="${escapeHtml(x.soLuongCan)}" onchange="updateSelectedQty(${i}, this.value)">
-      <select onchange="updateSelectedStatus(${i}, this.value)">
-        <option value="Mới" ${x.tinhTrangXuatKho === 'Mới' ? 'selected' : ''}>Mới</option>
-        <option value="Cũ" ${x.tinhTrangXuatKho === 'Cũ' ? 'selected' : ''}>Cũ</option>
-        <option value="Tốt" ${x.tinhTrangXuatKho === 'Tốt' ? 'selected' : ''}>Tốt</option>
-        <option value="K.xđ" ${x.tinhTrangXuatKho === 'K.xđ' ? 'selected' : ''}>K.xđ</option>
-      </select>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
-function removeSelectedVatTu(index) {
-  APP.selected.splice(index, 1);
-  renderSelected();
-  renderVatTuSearch();
+function statusOptions(current) {
+  const list = ['Mới', 'Cũ', 'Tốt', 'K.xđ'];
+  return list.map(x => `<option value="${x}" ${x === current ? 'selected' : ''}>${x}</option>`).join('');
 }
 
-function updateSelectedQty(index, value) {
-  if (APP.selected[index]) {
-    APP.selected[index].soLuongCan = value;
-  }
+function getTenVatTu(item) {
+  return String(getObjValue(item, [
+    'Tên Chi Tiết / Linh Kiện Thay Thế',
+    'Tên chi tiết / linh kiện thay thế',
+    'Tên chi tiết',
+    'Tên vật tư',
+    'Ten vat tu',
+    'Vật tư',
+    'Linh kiện',
+    'Hạng mục vật tư'
+  ]) || '').trim();
 }
 
-function updateSelectedStatus(index, value) {
-  if (APP.selected[index]) {
-    APP.selected[index].tinhTrangXuatKho = value;
-  }
+function getCumLinhKien(item) {
+  return String(getObjValue(item, [
+    'Cụm Linh Kiện',
+    'Cụm linh kiện',
+    'Cụm vật tư',
+    'Cum linh kien',
+    'Nhóm',
+    'Hệ thống'
+  ]) || '').trim();
+}
+
+function makeMaterialId(item) {
+  const ten = getTenVatTu(item);
+  const cum = getCumLinhKien(item);
+  const ma = getObjValue(item, ['Mã vật tư', 'Ma vat tu']) || '';
+
+  return normText(cum + '|' + ten + '|' + ma);
 }
 
 
 /****************************************************
- * PHIEU LIST / PREVIEW / EXPORT / EDIT / DELETE
+ * FORM PAYLOAD
  ****************************************************/
 
-async function loadPhieuList(isAutoRefresh) {
+function collectFormPayload() {
+  const mucDich = getRadioValue('mucDich');
+
+  let cuThe = '';
+
+  if (mucDich === 'Bảo dưỡng sửa chữa') {
+    cuThe = getValue('hienTuong');
+  } else {
+    cuThe = getValue('cuTheNhapTay').trim();
+  }
+
+  const may = getCurrentMachine();
+
+  return {
+    doiTruong: getValue('doiTruong'),
+    thanhVien: SELECTED_MEMBERS.slice(),
+    maMay: getValue('maMay'),
+    tenTrai: may ? getObjValue(may, ['Tên trại', 'Ten trai', 'Trại', 'Địa chỉ trại']) : getText('tenTrai'),
+    donVi: may ? getObjValue(may, ['Đơn vị', 'Don vi']) : getText('donVi'),
+    khuVuc: may ? getObjValue(may, ['Khu vực', 'Khu Vực', 'Khu vuc']) : getText('khuVuc'),
+    tinhTP: may ? getObjValue(may, ['Tỉnh/TP', 'Tinh/TP', 'Tỉnh TP', 'Tỉnh']) : getText('tinhTP'),
+    ngayGioXuatKho: getValue('ngayGioXuatKho'),
+    nguoiXuatKho: getValue('nguoiXuatKho'),
+    ngayGioNhapKho: getValue('ngayGioNhapKho'),
+    nguoiNhapKho: getValue('nguoiNhapKho'),
+    mucDich,
+    cuThe,
+    ghiChu: '',
+    items: APP.selected.map((x, idx) => ({
+      stt: idx + 1,
+      nguonVatTu: x.nguonVatTu || '',
+      cumLinhKien: x.cumLinhKien || '',
+      tenVatTu: x.tenVatTu || '',
+      maVatTu: x.maVatTu || '',
+      donViTinh: x.donViTinh || '',
+      soLuongCan: x.soLuongCan || '',
+      soLuongXuatKho: '',
+      tinhTrangXuatKho: x.tinhTrangXuatKho || 'Mới',
+      soLuongSuDung: '',
+      soLuongNhapKho: '',
+      tinhTrangNhapKho: '',
+      ghiChu: x.ghiChu || ''
+    }))
+  };
+}
+
+function validatePayloadClient(payload) {
+  if (!payload.doiTruong) return 'Vui lòng chọn đội trưởng.';
+  if (!payload.thanhVien || !payload.thanhVien.length) return 'Vui lòng chọn thành viên.';
+  if (!payload.maMay) return 'Vui lòng chọn mã máy.';
+  if (!payload.ngayGioXuatKho) return 'Vui lòng nhập ngày giờ xuất kho.';
+  if (!payload.nguoiXuatKho) return 'Vui lòng chọn người xuất kho.';
+  if (!payload.mucDich) return 'Vui lòng chọn mục đích.';
+  if (!payload.cuThe) return 'Vui lòng nhập/chọn nội dung cụ thể.';
+  if (!payload.items || !payload.items.length) return 'Vui lòng chọn vật tư.';
+
+  if (payload.thanhVien.includes(payload.doiTruong)) {
+    return 'Thành viên không được trùng với đội trưởng.';
+  }
+
+  return '';
+}
+
+function getCurrentMachine() {
+  const maMay = getValue('maMay');
+  if (!maMay) return null;
+
+  return APP.may.find(x => getMayCode(x) === maMay) || null;
+}
+
+
+/****************************************************
+ * SAVE / PREVIEW / EDIT
+ ****************************************************/
+
+async function previewCurrentForm() {
+  const payload = collectFormPayload();
+  const err = validatePayloadClient(payload);
+
+  if (err) {
+    alert(err);
+    return;
+  }
+
+  setBusy(true, 'Đang tạo xem trước...');
+
+  try {
+    const html = await api('previewDraft', {
+      token: TOKEN,
+      payload
+    });
+
+    openPreviewHtml(html);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function save() {
+  const payload = collectFormPayload();
+  const err = validatePayloadClient(payload);
+
+  if (err) {
+    alert(err);
+    return;
+  }
+
+  setBusy(true, EDITING_MA_PHIEU ? 'Đang cập nhật phiếu...' : 'Đang lưu phiếu...');
+
+  try {
+    let res;
+
+    if (EDITING_MA_PHIEU) {
+      res = await api('updatePhieu', {
+        token: TOKEN,
+        maPhieu: EDITING_MA_PHIEU,
+        payload
+      });
+    } else {
+      res = await api('savePhieu', {
+        token: TOKEN,
+        payload
+      });
+    }
+
+    alert((EDITING_MA_PHIEU ? 'Đã cập nhật phiếu: ' : 'Đã lưu phiếu: ') + res.maPhieu);
+
+    resetForm();
+    await loadPhieuList(false);
+
+    const historyBtn = [...document.querySelectorAll('.nav')]
+      .find(btn => (btn.textContent || '').includes('Phiếu đã tạo'));
+
+    showTab('historyTab', historyBtn);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function resetForm() {
+  EDITING_MA_PHIEU = '';
+
+  const title = document.getElementById('formTitle');
+  if (title) title.textContent = 'Phiếu chuẩn bị vật tư';
+
+  const saveBtn = document.getElementById('saveBtn');
+  if (saveBtn) saveBtn.textContent = 'Lưu phiếu';
+
+  const cancelBtn = document.getElementById('cancelEditBtn');
+  if (cancelBtn) cancelBtn.classList.add('hidden');
+
+  setValue('doiTruong', '');
+  SELECTED_MEMBERS = [];
+  renderMemberDropdown();
+  renderMemberText();
+
+  setValue('maMay', '');
+  onMayChange();
+
+  setDefaultDateTime();
+
+  setValue('nguoiXuatKho', '');
+  setValue('ngayGioNhapKho', '');
+  setValue('nguoiNhapKho', '');
+
+  setRadioValue('mucDich', 'Bảo dưỡng sửa chữa');
+  setValue('hienTuong', '');
+  setValue('cuTheNhapTay', '');
+  setValue('searchVatTu', '');
+
+  onMucDichChange();
+  resetSelectedMaterials();
+}
+
+function cancelEdit() {
+  resetForm();
+}
+
+async function editPhieu(maPhieu) {
+  setBusy(true, 'Đang tải phiếu để sửa...');
+
+  try {
+    const data = await api('getPhieuDetail', {
+      token: TOKEN,
+      maPhieu
+    });
+
+    fillFormFromPhieu(data.phieu, data.items);
+
+    const formBtn = [...document.querySelectorAll('.nav')]
+      .find(btn => (btn.textContent || '').includes('Tạo phiếu'));
+
+    showTab('formTab', formBtn);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function fillFormFromPhieu(phieu, items) {
+  EDITING_MA_PHIEU = phieu.maPhieu;
+
+  const title = document.getElementById('formTitle');
+  if (title) title.textContent = 'Chỉnh sửa phiếu: ' + phieu.maPhieu;
+
+  const saveBtn = document.getElementById('saveBtn');
+  if (saveBtn) saveBtn.textContent = 'Cập nhật phiếu';
+
+  const cancelBtn = document.getElementById('cancelEditBtn');
+  if (cancelBtn) cancelBtn.classList.remove('hidden');
+
+  setValue('doiTruong', phieu.doiTruong || '');
+
+  SELECTED_MEMBERS = String(phieu.thanhVien || '')
+    .split(';')
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  renderMemberDropdown();
+  renderMemberText();
+
+  setValue('maMay', phieu.maMay || '');
+  onMayChange();
+
+  setValue('ngayGioXuatKho', parseDateTimeToInput(phieu.ngayGioXuatKho));
+  setValue('nguoiXuatKho', phieu.nguoiXuatKho || '');
+  setValue('ngayGioNhapKho', parseDateTimeToInput(phieu.ngayGioNhapKho));
+  setValue('nguoiNhapKho', phieu.nguoiNhapKho || '');
+
+  setRadioValue('mucDich', phieu.mucDich || 'Bảo dưỡng sửa chữa');
+  onMucDichChange();
+
+  if ((phieu.mucDich || '') === 'Bảo dưỡng sửa chữa') {
+    setValue('hienTuong', phieu.cuThe || '');
+  } else {
+    setValue('cuTheNhapTay', phieu.cuThe || '');
+  }
+
+  APP.selected = (items || []).map(x => ({
+    id: makeMaterialId({
+      'Cụm Linh Kiện': x.cumLinhKien,
+      'Tên Chi Tiết / Linh Kiện Thay Thế': x.tenVatTu,
+      'Mã vật tư': x.maVatTu
+    }),
+    nguonVatTu: x.nguonVatTu || '',
+    cumLinhKien: x.cumLinhKien || '',
+    tenVatTu: x.tenVatTu || '',
+    maVatTu: x.maVatTu || '',
+    donViTinh: x.donViTinh || '',
+    soLuongCan: x.soLuongCan || 1,
+    tinhTrangXuatKho: x.tinhTrangXuatKho || 'Mới',
+    ghiChu: x.ghiChu || '',
+    fixed: x.nguonVatTu === 'Cố định'
+  }));
+
+  setValue('searchVatTu', '');
+
+  renderVatTuSearch();
+  renderSelectedItems();
+}
+
+
+/****************************************************
+ * HISTORY / EXPORT / DELETE
+ ****************************************************/
+
+async function loadPhieuList(silent) {
   if (!TOKEN) return;
 
   const box = document.getElementById('phieuList');
   if (!box) return;
 
-  if (!isAutoRefresh) {
+  if (!silent) {
     box.innerHTML = '<i>Đang tải danh sách phiếu...</i>';
   }
 
   try {
     const list = await api('listPhieu', { token: TOKEN });
-    renderPhieuList(list);
+    renderPhieuList(list || []);
   } catch (err) {
-    if (!isAutoRefresh) {
-      box.innerHTML = '<span style="color:red;">Lỗi tải danh sách phiếu: ' + escapeHtml(err.message) + '</span>';
-    }
+    box.innerHTML = '<span class="msg">Lỗi tải phiếu: ' + escapeHtml(err.message) + '</span>';
   }
 }
 
@@ -1224,7 +1336,7 @@ function renderPhieuList(list) {
   const box = document.getElementById('phieuList');
   if (!box) return;
 
-  if (!list || !list.length) {
+  if (!list.length) {
     box.innerHTML = '<i>Chưa có phiếu nào.</i>';
     return;
   }
@@ -1259,11 +1371,11 @@ function renderPhieuList(list) {
               <td>${escapeHtml(p.cuThe)}</td>
               <td>${escapeHtml(p.trangThai)}</td>
               <td>
-                <button class="small-btn" onclick="previewSavedPhieu('${escapeHtml(p.maPhieu)}')">Xem trước</button>
-                <button class="small-btn" onclick="exportPdf('${escapeHtml(p.maPhieu)}')">PDF</button>
-                <button class="small-btn" onclick="exportWord('${escapeHtml(p.maPhieu)}')">Word</button>
-                <button class="small-btn secondary" onclick="editPhieu('${escapeHtml(p.maPhieu)}')">Sửa</button>
-                <button class="small-btn danger" onclick="deletePhieuUI('${escapeHtml(p.maPhieu)}')">Xóa</button>
+                <button type="button" class="small-btn" onclick="previewSavedPhieu('${escapeJs(p.maPhieu)}')">Xem trước</button>
+                <button type="button" class="small-btn" onclick="exportPdf('${escapeJs(p.maPhieu)}')">PDF</button>
+                <button type="button" class="small-btn" onclick="exportWord('${escapeJs(p.maPhieu)}')">Word</button>
+                <button type="button" class="small-btn secondary" onclick="editPhieu('${escapeJs(p.maPhieu)}')">Sửa</button>
+                <button type="button" class="small-btn danger" onclick="deletePhieuUI('${escapeJs(p.maPhieu)}')">Xóa</button>
               </td>
             </tr>
           `).join('')}
@@ -1273,42 +1385,108 @@ function renderPhieuList(list) {
   `;
 }
 
-async function previewCurrentForm() {
-  return runBusy('Đang xem trước...', async () => {
-    try {
-      const payload = buildCurrentPayload();
-      const html = renderPreviewHtmlClient(payload);
-
-      openPreview(html);
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-}
-
 async function previewSavedPhieu(maPhieu) {
-  return runBusy('Đang xem trước...', async () => {
-    try {
-      const html = await api('previewPhieu', {
-        token: TOKEN,
-        maPhieu
-      });
+  setBusy(true, 'Đang mở xem trước...');
 
-      openPreview(html);
-    } catch (err) {
-      alert(err.message);
-    }
-  });
+  try {
+    const html = await api('previewPhieu', {
+      token: TOKEN,
+      maPhieu
+    });
+
+    openPreviewHtml(html);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    setBusy(false);
+  }
 }
 
-function openPreview(html) {
+async function exportPdf(maPhieu) {
+  setBusy(true, 'Đang xuất PDF...');
+
+  try {
+    const url = await api('exportPhieuPdf', {
+      token: TOKEN,
+      maPhieu
+    });
+
+    window.open(url, '_blank');
+    await loadPhieuList(true);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function exportWord(maPhieu) {
+  setBusy(true, 'Đang xuất Word...');
+
+  try {
+    const url = await api('exportPhieuWord', {
+      token: TOKEN,
+      maPhieu
+    });
+
+    window.open(url, '_blank');
+    await loadPhieuList(true);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function deletePhieuUI(maPhieu) {
+  if (!maPhieu) return;
+
+  const ok = confirm(
+    'Bạn chắc chắn muốn xóa phiếu ' + maPhieu + '?\n\n' +
+    'Thao tác này sẽ xóa dữ liệu ở sheet 10, sheet 11 và chuyển file PDF/Word vào thùng rác nếu có.'
+  );
+
+  if (!ok) return;
+
+  setBusy(true, 'Đang xóa phiếu...');
+
+  try {
+    await api('deletePhieu', {
+      token: TOKEN,
+      maPhieu
+    });
+
+    alert('Đã xóa phiếu: ' + maPhieu);
+
+    if (EDITING_MA_PHIEU === maPhieu) {
+      resetForm();
+    }
+
+    await loadPhieuList(false);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+
+/****************************************************
+ * PREVIEW MODAL
+ ****************************************************/
+
+function openPreviewHtml(html) {
   const modal = document.getElementById('previewModal');
   const frame = document.getElementById('previewFrame');
 
   if (!modal || !frame) return;
 
   modal.classList.remove('hidden');
-  frame.srcdoc = html;
+
+  const doc = frame.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
 }
 
 function closePreview() {
@@ -1316,170 +1494,15 @@ function closePreview() {
   const frame = document.getElementById('previewFrame');
 
   if (modal) modal.classList.add('hidden');
-  if (frame) frame.srcdoc = '';
-}
 
-async function exportPdf(maPhieu) {
-  return runBusy('Đang tạo PDF...', async () => {
+  if (frame) {
     try {
-      const url = await api('exportPhieuPdf', {
-        token: TOKEN,
-        maPhieu
-      });
-
-      openDriveUrl(url);
-      await loadPhieuList(true);
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-}
-
-async function exportWord(maPhieu) {
-  return runBusy('Đang tạo Word...', async () => {
-    try {
-      const url = await api('exportPhieuWord', {
-        token: TOKEN,
-        maPhieu
-      });
-
-      openDriveUrl(url);
-      await loadPhieuList(true);
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-}
-
-function openDriveUrl(url) {
-  if (!url) {
-    alert('Không nhận được link file.');
-    return;
+      const doc = frame.contentWindow.document;
+      doc.open();
+      doc.write('');
+      doc.close();
+    } catch (e) {}
   }
-
-  window.open(url, '_blank', 'noopener,noreferrer');
-}
-
-async function editPhieu(maPhieu) {
-  return runBusy('Đang tải phiếu...', async () => {
-    try {
-      const data = await api('getPhieuDetail', {
-        token: TOKEN,
-        maPhieu
-      });
-
-      loadPhieuToForm(data);
-      showTabById('formTab');
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-}
-
-async function deletePhieuUI(maPhieu) {
-  const ok = confirm(
-    'Bạn chắc chắn muốn xóa phiếu ' + maPhieu + '?\n\n' +
-    'Thao tác này sẽ xóa dữ liệu ở sheet 10, sheet 11 và chuyển file PDF/Word đã tạo vào thùng rác nếu có.'
-  );
-
-  if (!ok) return;
-
-  return runBusy('Đang xóa phiếu...', async () => {
-    try {
-      const res = await api('deletePhieu', {
-        token: TOKEN,
-        maPhieu
-      });
-
-      alert('Đã xóa phiếu: ' + (res.maPhieu || maPhieu));
-      await loadPhieuList(false);
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-}
-
-function loadPhieuToForm(data) {
-  const p = data.phieu;
-  const items = data.items || [];
-
-  EDITING_MA_PHIEU = p.maPhieu || '';
-
-  setText('formTitle', 'Chỉnh sửa phiếu: ' + EDITING_MA_PHIEU);
-
-  const saveBtn = document.getElementById('saveBtn');
-  if (saveBtn) saveBtn.innerText = 'Cập nhật phiếu';
-
-  const cancelEditBtn = document.getElementById('cancelEditBtn');
-  if (cancelEditBtn) cancelEditBtn.classList.remove('hidden');
-
-  setSelectValue('doiTruong', p.doiTruong || '');
-
-  SELECTED_MEMBERS = String(p.thanhVien || '')
-    .split(';')
-    .map(x => x.trim())
-    .filter(Boolean);
-
-  renderMemberMultiSelect();
-
-  setSelectValue('maMay', p.maMay || '');
-  onMayChange();
-
-  setSelectValue('nguoiXuatKho', p.nguoiXuatKho || '');
-  setSelectValue('nguoiNhapKho', p.nguoiNhapKho || '');
-
-  setInputValue('ngayGioXuatKho', toDatetimeLocalValue(p.ngayGioXuatKho));
-  setInputValue('ngayGioNhapKho', toDatetimeLocalValue(p.ngayGioNhapKho));
-
-  const mucDich = p.mucDich || 'Bảo dưỡng sửa chữa';
-  const radio = document.querySelector(`input[name="mucDich"][value="${mucDich}"]`);
-
-  if (radio) radio.checked = true;
-
-  onMucDichChange();
-
-  if (mucDich === 'Bảo dưỡng sửa chữa') {
-    setSelectValue('hienTuong', p.cuThe || '');
-  } else {
-    setInputValue('cuTheNhapTay', p.cuThe || '');
-  }
-
-  APP.selected = items.map((x, i) => ({
-    id: 'edit_' + i + '_' + safeId(x.tenVatTu),
-    nguonVatTu: x.nguonVatTu || '',
-    cumLinhKien: x.cumLinhKien || '',
-    tenVatTu: x.tenVatTu || '',
-    maVatTu: x.maVatTu || '',
-    donViTinh: x.donViTinh || '',
-    soLuongCan: x.soLuongCan || 1,
-    tinhTrangXuatKho: x.tinhTrangXuatKho || 'Mới',
-    ghiChu: x.ghiChu || ''
-  }));
-
-  renderSelected();
-  renderVatTuSearch();
-}
-
-function toDatetimeLocalValue(v) {
-  if (!v) return '';
-
-  const s = String(v).trim();
-
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) {
-    return s.slice(0, 16);
-  }
-
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) {
-    return s.replace(' ', 'T').slice(0, 16);
-  }
-
-  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
-
-  if (m) {
-    return `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`;
-  }
-
-  return '';
 }
 
 
@@ -1487,64 +1510,60 @@ function toDatetimeLocalValue(v) {
  * ACCOUNT ADMIN
  ****************************************************/
 
-async function loadAccounts(isAutoRefresh) {
+async function loadAccounts(silent) {
   if (!CURRENT_USER || CURRENT_USER.role !== 'admin') return;
 
   const box = document.getElementById('accountList');
+  if (!box) return;
 
-  if (!isAutoRefresh && box) {
+  if (!silent) {
     box.innerHTML = '<i>Đang tải danh sách tài khoản...</i>';
   }
 
   try {
     const list = await api('listAccounts', { token: TOKEN });
-    renderAccounts(list);
+    ACCOUNT_CACHE = list || [];
+    renderAccounts(ACCOUNT_CACHE);
   } catch (err) {
-    if (box) {
-      box.innerHTML = '<span style="color:red;">Lỗi tải tài khoản: ' + escapeHtml(err.message) + '</span>';
-    }
+    box.innerHTML = '<span class="msg">Lỗi tải tài khoản: ' + escapeHtml(err.message) + '</span>';
   }
 }
 
 function renderAccounts(list) {
-  ACCOUNT_CACHE = list || [];
-
   const box = document.getElementById('accountList');
   if (!box) return;
 
-  if (!ACCOUNT_CACHE.length) {
+  if (!list.length) {
     box.innerHTML = '<i>Chưa có tài khoản.</i>';
     return;
   }
 
-  box.innerHTML = ACCOUNT_CACHE.map((acc, i) => {
+  box.innerHTML = list.map(acc => {
     const status = String(acc.status || '').toLowerCase();
-    let actionBtn = '';
-
-    if (status === 'pending') {
-      actionBtn = `
-        <button class="small-btn" onclick="toggleAccount(${acc.rowNumber}, 'active')">Duyệt</button>
-        <button class="small-btn danger" onclick="toggleAccount(${acc.rowNumber}, 'locked')">Từ chối</button>
-      `;
-    } else if (status === 'active') {
-      actionBtn = `
-        <button class="small-btn secondary" onclick="toggleAccount(${acc.rowNumber}, 'locked')">Khóa</button>
-      `;
-    } else {
-      actionBtn = `
-        <button class="small-btn" onclick="toggleAccount(${acc.rowNumber}, 'active')">Mở</button>
-      `;
-    }
 
     return `
       <div class="account-row ${escapeHtml(status)}">
-        <div><b>${escapeHtml(acc.username)}</b></div>
-        <div>${escapeHtml(acc.fullName)}</div>
-        <div>${escapeHtml(acc.role)}</div>
-        <div>${renderStatusBadge(status)}</div>
         <div>
-          <button class="small-btn" onclick="editAccountByIndex(${i})">Sửa</button>
-          ${actionBtn}
+          <b>${escapeHtml(acc.username)}</b><br>
+          <small>${escapeHtml(acc.createdAt || '')}</small>
+        </div>
+
+        <div>${escapeHtml(acc.fullName)}</div>
+
+        <div>${escapeHtml(acc.role)}</div>
+
+        <div>${renderStatusBadge(status)}</div>
+
+        <div>
+          <button type="button" class="small-btn" onclick="editAccountUI(${Number(acc.rowNumber)})">Sửa</button>
+          ${status === 'pending'
+            ? `<button type="button" class="small-btn" onclick="setAccountStatusUI(${Number(acc.rowNumber)}, 'active')">Duyệt</button>`
+            : ''
+          }
+          ${status === 'active'
+            ? `<button type="button" class="small-btn danger" onclick="setAccountStatusUI(${Number(acc.rowNumber)}, 'locked')">Khóa</button>`
+            : `<button type="button" class="small-btn" onclick="setAccountStatusUI(${Number(acc.rowNumber)}, 'active')">Mở</button>`
+          }
         </div>
       </div>
     `;
@@ -1559,30 +1578,35 @@ function renderStatusBadge(status) {
   return '<span class="badge">' + escapeHtml(status) + '</span>';
 }
 
-function editAccountByIndex(index) {
-  const acc = ACCOUNT_CACHE[index];
+function editAccountUI(rowNumber) {
+  const acc = ACCOUNT_CACHE.find(x => Number(x.rowNumber) === Number(rowNumber));
   if (!acc) return;
 
-  setInputValue('accRow', acc.rowNumber || '');
-  setInputValue('accUsername', acc.username || '');
-  setInputValue('accPassword', '');
-  setInputValue('accFullName', acc.fullName || '');
-  setInputValue('accRole', acc.role || 'ktv');
-  setInputValue('accStatus', acc.status || 'active');
-  setInputValue('accNote', acc.note || '');
+  setValue('accRow', acc.rowNumber);
+  setValue('accUsername', acc.username);
+  setValue('accPassword', '');
+  setValue('accFullName', acc.fullName);
+  setValue('accRole', acc.role || 'ktv');
+  setValue('accStatus', acc.status || 'active');
+  setValue('accNote', acc.note || '');
 }
 
 function clearAccountForm() {
-  setInputValue('accRow', '');
-  setInputValue('accUsername', '');
-  setInputValue('accPassword', '');
-  setInputValue('accFullName', '');
-  setInputValue('accRole', 'ktv');
-  setInputValue('accStatus', 'active');
-  setInputValue('accNote', '');
+  setValue('accRow', '');
+  setValue('accUsername', '');
+  setValue('accPassword', '');
+  setValue('accFullName', '');
+  setValue('accRole', 'ktv');
+  setValue('accStatus', 'active');
+  setValue('accNote', '');
 }
 
 async function saveAccountUI() {
+  if (!CURRENT_USER || CURRENT_USER.role !== 'admin') {
+    alert('Bạn không có quyền admin.');
+    return;
+  }
+
   const account = {
     rowNumber: getValue('accRow'),
     username: getValue('accUsername').trim(),
@@ -1593,381 +1617,202 @@ async function saveAccountUI() {
     note: getValue('accNote').trim()
   };
 
-  return runBusy('Đang lưu tài khoản...', async () => {
-    try {
-      const res = await api('saveAccount', {
-        token: TOKEN,
-        account
-      });
+  if (!account.username) return alert('Thiếu tên đăng nhập.');
+  if (!account.fullName) return alert('Thiếu họ và tên.');
 
-      alert(res.message || 'Đã lưu tài khoản.');
-      clearAccountForm();
-      await loadAccounts(false);
-    } catch (err) {
-      alert(err.message);
-    }
-  });
+  setBusy(true, 'Đang lưu tài khoản...');
+
+  try {
+    await api('saveAccount', {
+      token: TOKEN,
+      account
+    });
+
+    clearAccountForm();
+    await loadAccounts(false);
+    alert('Đã lưu tài khoản.');
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    setBusy(false);
+  }
 }
 
-async function toggleAccount(rowNumber, status) {
-  return runBusy('Đang cập nhật tài khoản...', async () => {
-    try {
-      await api('setAccountStatus', {
-        token: TOKEN,
-        rowNumber,
-        status
-      });
+async function setAccountStatusUI(rowNumber, status) {
+  setBusy(true, 'Đang cập nhật trạng thái tài khoản...');
 
-      await loadAccounts(false);
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-}
+  try {
+    await api('setAccountStatus', {
+      token: TOKEN,
+      rowNumber,
+      status
+    });
 
-
-/****************************************************
- * PREVIEW HTML CLIENT
- ****************************************************/
-
-function renderPreviewHtmlClient(payload) {
-  const phieu = {
-    maPhieu: payload.maPhieu || 'BẢN XEM TRƯỚC',
-    doiTruong: payload.doiTruong || '',
-    thanhVien: Array.isArray(payload.thanhVien)
-      ? payload.thanhVien.join('; ')
-      : payload.thanhVien || '',
-    maMay: payload.maMay || '',
-    tenTrai: payload.tenTrai || '',
-    ngayGioXuatKho: payload.ngayGioXuatKho || '',
-    ngayGioNhapKho: payload.ngayGioNhapKho || '',
-    nguoiXuatKho: payload.nguoiXuatKho || '',
-    nguoiNhapKho: payload.nguoiNhapKho || '',
-    mucDich: payload.mucDich || '',
-    cuThe: payload.cuThe || ''
-  };
-
-  const rows = (payload.items || []).map((x, i) => {
-    const tt = String(x.tinhTrangXuatKho || '').trim();
-
-    const checkedMoi = tt === 'Mới' ? '✓' : '';
-    const checkedCu = tt === 'Cũ' ? '✓' : '';
-    const checkedTot = tt === 'Tốt' ? '✓' : '';
-    const checkedKxd =
-      tt === 'K.xđ' ||
-      tt === 'KXĐ' ||
-      tt === 'Không xác định'
-        ? '✓'
-        : '';
-
-    return `
-      <tr>
-        <td class="center">${i + 1}</td>
-        <td>${escapeHtml(x.tenVatTu)}</td>
-        <td class="center">${escapeHtml(x.soLuongCan || '')}</td>
-        <td class="center"></td>
-
-        <td class="center">${checkedMoi}</td>
-        <td class="center">${checkedCu}</td>
-        <td class="center">${checkedTot}</td>
-        <td class="center">${checkedKxd}</td>
-
-        <td class="center"></td>
-        <td class="center"></td>
-
-        <td class="center"></td>
-        <td class="center"></td>
-        <td class="center"></td>
-        <td class="center"></td>
-      </tr>
-    `;
-  }).join('');
-
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-  @page {
-    size: A4 landscape;
-    margin: 10mm;
+    await loadAccounts(false);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    setBusy(false);
   }
-
-  body {
-    font-family: "Times New Roman", Times, serif;
-    font-size: 13px;
-    color: #000;
-    margin: 0;
-    background: #fff;
-  }
-
-  .page {
-    width: 297mm;
-    min-height: 210mm;
-    margin: 0 auto;
-    padding: 8mm 10mm;
-    box-sizing: border-box;
-    background: #fff;
-  }
-
-  .title {
-    text-align: center;
-    font-size: 21px;
-    font-weight: bold;
-    text-transform: uppercase;
-    margin-bottom: 18px;
-  }
-
-  .top-grid {
-    display: grid;
-    grid-template-columns: 1.05fr 1.05fr 1.05fr 1.05fr;
-    gap: 26px;
-    margin-bottom: 12px;
-    font-size: 14px;
-  }
-
-  .top-block-title {
-    font-weight: bold;
-    margin-bottom: 6px;
-  }
-
-  .line {
-    display: block;
-    border-bottom: 1px dotted #000;
-    min-height: 20px;
-    margin-bottom: 7px;
-    word-break: break-word;
-  }
-
-  .purpose-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    margin: 18px 35px 14px;
-    font-size: 15px;
-    font-weight: bold;
-  }
-
-  .purpose-row div {
-    text-align: center;
-  }
-
-  .dot {
-    font-size: 20px;
-    vertical-align: middle;
-    margin-right: 10px;
-  }
-
-  .section-title {
-    font-weight: bold;
-    font-size: 15px;
-    margin: 10px 0 6px;
-  }
-
-  .detail-line {
-    border-bottom: 1px dotted #000;
-    min-height: 22px;
-    margin-bottom: 4px;
-    padding-left: 4px;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  th,
-  td {
-    border: 1px solid #000;
-    padding: 4px;
-    vertical-align: middle;
-  }
-
-  th {
-    text-align: center;
-    font-weight: bold;
-  }
-
-  .center {
-    text-align: center;
-  }
-
-  .vt-table {
-    font-size: 12.5px;
-    table-layout: fixed;
-  }
-
-  .vt-table th,
-  .vt-table td {
-    height: 23px;
-  }
-
-  .col-stt {
-    width: 32px;
-  }
-
-  .col-name {
-    width: 275px;
-  }
-
-  .col-small {
-    width: 72px;
-  }
-
-  .col-status {
-    width: 42px;
-  }
-
-  .sign {
-    margin-top: 24px;
-  }
-
-  .sign td {
-    border: none;
-    text-align: center;
-    height: 70px;
-    font-weight: bold;
-  }
-</style>
-</head>
-
-<body>
-<div class="page">
-  <div class="title">DANH SÁCH VẬT TƯ</div>
-
-  <div class="top-grid">
-    <div>
-      <div class="top-block-title">1. Đội nhóm nhận nhiệm vụ</div>
-      <div>Đội trưởng:</div>
-      <span class="line">${escapeHtml(phieu.doiTruong)}</span>
-      <div>Thành viên:</div>
-      <span class="line">${escapeHtml(phieu.thanhVien)}</span>
-    </div>
-
-    <div>
-      <div class="top-block-title">2. Mã hệ thống đảm nhiệm</div>
-      <div>Mã máy:</div>
-      <span class="line">${escapeHtml(phieu.maMay)}</span>
-      <div>Địa chỉ trại:</div>
-      <span class="line">${escapeHtml(phieu.tenTrai)}</span>
-    </div>
-
-    <div>
-      <div class="top-block-title">3. Thời gian thực hiện</div>
-      <div>Ngày/giờ xuất kho:</div>
-      <span class="line">${escapeHtml(phieu.ngayGioXuatKho)}</span>
-      <div>Ngày/giờ nhập kho:</div>
-      <span class="line">${escapeHtml(phieu.ngayGioNhapKho)}</span>
-    </div>
-
-    <div>
-      <div class="top-block-title">4. Thành viên thực hiện</div>
-      <div>Xuất kho:</div>
-      <span class="line">${escapeHtml(phieu.nguoiXuatKho)}</span>
-      <div>Nhập kho:</div>
-      <span class="line">${escapeHtml(phieu.nguoiNhapKho)}</span>
-    </div>
-  </div>
-
-  <div class="section-title">5. Mục đích sử dụng vật tư</div>
-
-  <div class="purpose-row">
-    <div>
-      <span class="dot">${phieu.mucDich === 'Bảo dưỡng sửa chữa' ? '●' : '○'}</span>
-      Bảo dưỡng sửa chữa
-    </div>
-    <div>
-      <span class="dot">${phieu.mucDich === 'Lắp đặt' ? '●' : '○'}</span>
-      Lắp đặt
-    </div>
-    <div>
-      <span class="dot">${phieu.mucDich === 'Sản xuất' ? '●' : '○'}</span>
-      Sản xuất
-    </div>
-  </div>
-
-  <div><b>Cụ thể:</b></div>
-  <div class="detail-line">${escapeHtml(phieu.cuThe)}</div>
-  <div class="detail-line"></div>
-
-  <div class="section-title">6. Danh sách vật tư cần chuẩn bị</div>
-
-  <table class="vt-table">
-    <thead>
-      <tr>
-        <th rowspan="2" class="col-stt">STT</th>
-        <th rowspan="2" class="col-name">Hạng mục vật tư</th>
-        <th rowspan="2" class="col-small">Số lượng<br>cần</th>
-        <th rowspan="2" class="col-small">Số lượng<br>xuất kho</th>
-
-        <th colspan="4">Tình trạng</th>
-
-        <th rowspan="2" class="col-small">Số lượng<br>sử dụng</th>
-        <th rowspan="2" class="col-small">Số lượng<br>nhập kho</th>
-
-        <th colspan="4">Tình trạng</th>
-      </tr>
-
-      <tr>
-        <th class="col-status">Mới</th>
-        <th class="col-status">Cũ</th>
-        <th class="col-status">Tốt</th>
-        <th class="col-status">K.xđ</th>
-
-        <th class="col-status">Mới</th>
-        <th class="col-status">Cũ</th>
-        <th class="col-status">Tốt</th>
-        <th class="col-status">Hỏng</th>
-      </tr>
-    </thead>
-
-    <tbody>
-      ${rows || '<tr><td colspan="14" class="center">Chưa có vật tư</td></tr>'}
-    </tbody>
-  </table>
-
-  <table class="sign">
-    <tr>
-      <td>Người lập phiếu</td>
-      <td>Người xuất kho</td>
-      <td>Đội trưởng</td>
-      <td>Người nhập kho</td>
-    </tr>
-  </table>
-</div>
-</body>
-</html>`;
 }
 
 
 /****************************************************
- * UTILS
+ * BUSY
  ****************************************************/
 
-function normalizeName(s) {
-  return removeTone(String(s || '').trim().toLowerCase());
+function setBusy(isBusy, message) {
+  IS_BUSY = isBusy;
+
+  const buttons = document.querySelectorAll('button');
+  buttons.forEach(btn => {
+    if (btn.classList.contains('nav')) return;
+    btn.disabled = isBusy;
+  });
+
+  const saveBtn = document.getElementById('saveBtn');
+
+  if (saveBtn) {
+    if (isBusy) {
+      saveBtn.dataset.oldText = saveBtn.textContent;
+      saveBtn.textContent = message || 'Đang xử lý...';
+    } else if (saveBtn.dataset.oldText) {
+      saveBtn.textContent = saveBtn.dataset.oldText;
+      delete saveBtn.dataset.oldText;
+    }
+  }
 }
 
-function removeTone(str) {
-  return String(str || '')
+
+/****************************************************
+ * UTILS DOM
+ ****************************************************/
+
+function getValue(id) {
+  const el = document.getElementById(id);
+  return el ? String(el.value || '') : '';
+}
+
+function setValue(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value || '';
+}
+
+function getText(id) {
+  const el = document.getElementById(id);
+  return el ? String(el.textContent || '') : '';
+}
+
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value || '';
+}
+
+function getRadioValue(name) {
+  const el = document.querySelector('input[name="' + name + '"]:checked');
+  return el ? el.value : '';
+}
+
+function setRadioValue(name, value) {
+  const list = document.querySelectorAll('input[name="' + name + '"]');
+
+  list.forEach(x => {
+    x.checked = x.value === value;
+  });
+}
+
+function getObjValue(obj, keys) {
+  if (!obj) return '';
+
+  const normKeys = keys.map(normText);
+
+  for (const k in obj) {
+    if (normKeys.includes(normText(k))) {
+      return obj[k];
+    }
+  }
+
+  return '';
+}
+
+function normText(s) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/đ/g, 'd')
-    .replace(/Đ/g, 'D');
+    .replace(/\s+/g, ' ');
 }
 
-function safeId(str) {
-  return removeTone(String(str || ''))
-    .replace(/[^a-zA-Z0-9]/g, '_')
-    .slice(0, 40);
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, function (m) {
+    return {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    }[m];
+  });
 }
 
-function escapeHtml(str) {
-  return String(str || '').replace(/[&<>"']/g, m => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#039;'
-  }[m]));
+function escapeJs(s) {
+  return String(s || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '');
+}
+
+function cssId(s) {
+  return String(s || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function uniqueArray(arr) {
+  return [...new Set(arr.map(x => String(x || '').trim()).filter(Boolean))];
+}
+
+function groupBy(arr, fn) {
+  return arr.reduce((acc, item) => {
+    const key = fn(item) || 'Khác';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(item);
+    return acc;
+  }, {});
+}
+
+function normalizeQty(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return 1;
+  return n;
+}
+
+function toDatetimeLocalValue(date) {
+  const d = new Date(date);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+function parseDateTimeToInput(value) {
+  if (!value) return '';
+
+  const s = String(value).trim();
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) {
+    return s.slice(0, 16);
+  }
+
+  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+  if (m) {
+    return `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`;
+  }
+
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return toDatetimeLocalValue(d);
+  }
+
+  return '';
 }
