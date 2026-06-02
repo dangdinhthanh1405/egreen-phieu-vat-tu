@@ -1,4 +1,4 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbwZpTP6lB-3siuGMMQWBObtVqY5ra64MLh6V_1m2ZZ-9O8RVtYaiyZArtEl20bhUcnf/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzRiJvsp32cKWM4SXf77e6nP0gSDDTCX_dbfvEPIcX1jfgumBoQy9eGVkp3FFdmWINO/exec';
 
 let TOKEN = '';
 let CURRENT_USER = null;
@@ -16,30 +16,67 @@ let APP = {
   selected: []
 };
 
-async function api(action, data = {}) {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    redirect: 'follow',
-    headers: {
-      'Content-Type': 'text/plain;charset=utf-8'
-    },
-    body: JSON.stringify({ action, data })
+function api(action, data = {}) {
+  return new Promise((resolve, reject) => {
+    const callbackName =
+      '__egreen_cb_' +
+      Date.now() +
+      '_' +
+      Math.random().toString(36).slice(2);
+
+    const payload = encodeURIComponent(JSON.stringify({
+      action,
+      data
+    }));
+
+    const script = document.createElement('script');
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('API phản hồi quá lâu. Kiểm tra link Apps Script hoặc quyền triển khai.'));
+    }, 30000);
+
+    function cleanup() {
+      clearTimeout(timeout);
+      delete window[callbackName];
+
+      if (script && script.parentNode) {
+        script.parentNode.removeChild(script);
+      }
+    }
+
+    window[callbackName] = function (res) {
+      cleanup();
+
+      if (!res) {
+        reject(new Error('API không trả dữ liệu.'));
+        return;
+      }
+
+      if (!res.success) {
+        reject(new Error(res.message || 'API lỗi.'));
+        return;
+      }
+
+      resolve(res.data);
+    };
+
+    script.onerror = function () {
+      cleanup();
+      reject(new Error('Không gọi được Apps Script API. Kiểm tra API_URL hoặc quyền Web App.'));
+    };
+
+    script.src =
+      API_URL +
+      '?callback=' +
+      encodeURIComponent(callbackName) +
+      '&payload=' +
+      payload +
+      '&_=' +
+      Date.now();
+
+    document.body.appendChild(script);
   });
-
-  const text = await res.text();
-  let json;
-
-  try {
-    json = JSON.parse(text);
-  } catch (e) {
-    throw new Error('API không trả JSON. Kiểm tra link Apps Script hoặc quyền triển khai.');
-  }
-
-  if (!json.success) {
-    throw new Error(json.message || 'API lỗi.');
-  }
-
-  return json.data;
 }
 
 window.onload = function () {
