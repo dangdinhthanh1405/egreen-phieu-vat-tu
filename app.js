@@ -1,4 +1,9 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbzt5hEsAaqfm-YeCq6oxGRn_x3K8x12tRaFsdUzWKI1soND4NnSXRtQ9s7I8A_-pO3M/exec';
+/****************************************************
+ * eGreen - Phiếu vật tư
+ * Frontend GitHub Pages
+ ****************************************************/
+
+const API_URL = 'https://script.google.com/macros/s/AKfycbylZkHsgDM7M0AC52da4LrHKOWoPbmJiiIRbmYZ_FH9mCaA-KTaByJRj4bEWJiE3-Y/exec';
 
 let TOKEN = '';
 let CURRENT_USER = null;
@@ -18,71 +23,19 @@ let APP = {
   selected: []
 };
 
+
+/****************************************************
+ * API JSONP
+ ****************************************************/
+
 function api(action, data = {}) {
   const payloadText = JSON.stringify({ action, data });
 
-  // Nếu dữ liệu nhỏ thì gọi JSONP bình thường
   if (payloadText.length <= 1500) {
     return jsonpCall_(action, data);
   }
 
-  // Nếu dữ liệu lớn, chia nhỏ để gửi lên Apps Script
   return apiChunked_(payloadText);
-}
-function pauseAutoRefresh() {
-  if (AUTO_REFRESH_TIMER) {
-    clearInterval(AUTO_REFRESH_TIMER);
-    AUTO_REFRESH_TIMER = null;
-  }
-}
-
-function resumeAutoRefresh() {
-  if (!TOKEN) return;
-  if (AUTO_REFRESH_TIMER) return;
-  startAutoRefresh();
-}
-
-function setBusy(isBusy, message) {
-  IS_BUSY = isBusy;
-
-  const saveBtn = document.getElementById('saveBtn');
-  const cancelEditBtn = document.getElementById('cancelEditBtn');
-
-  const buttons = document.querySelectorAll('button');
-  buttons.forEach(btn => {
-    if (btn.classList.contains('nav')) return;
-    btn.disabled = isBusy;
-    btn.style.opacity = isBusy ? '0.65' : '';
-    btn.style.cursor = isBusy ? 'not-allowed' : '';
-  });
-
-  if (saveBtn) {
-    if (isBusy) {
-      saveBtn.dataset.oldText = saveBtn.innerText;
-      saveBtn.innerText = message || 'Đang xử lý...';
-    } else if (saveBtn.dataset.oldText) {
-      saveBtn.innerText = saveBtn.dataset.oldText;
-      delete saveBtn.dataset.oldText;
-    }
-  }
-
-  if (!isBusy && cancelEditBtn) {
-    cancelEditBtn.disabled = false;
-  }
-}
-
-async function runBusy(message, taskFn) {
-  if (IS_BUSY) return;
-
-  pauseAutoRefresh();
-  setBusy(true, message);
-
-  try {
-    return await taskFn();
-  } finally {
-    setBusy(false);
-    resumeAutoRefresh();
-  }
 }
 
 function jsonpCall_(action, data = {}) {
@@ -103,11 +56,16 @@ function jsonpCall_(action, data = {}) {
     const timeout = setTimeout(() => {
       cleanup();
       reject(new Error('API phản hồi quá lâu. Kiểm tra link Apps Script hoặc quyền triển khai.'));
-    }, 30000);
+    }, 45000);
 
     function cleanup() {
       clearTimeout(timeout);
-      delete window[callbackName];
+
+      try {
+        delete window[callbackName];
+      } catch (e) {
+        window[callbackName] = undefined;
+      }
 
       if (script && script.parentNode) {
         script.parentNode.removeChild(script);
@@ -161,6 +119,7 @@ async function apiChunked_(payloadText) {
 
   for (let i = 0; i < payloadText.length; i += chunkSize) {
     const chunk = payloadText.slice(i, i + chunkSize);
+
     await jsonpCall_('__chunkAppend', {
       key,
       chunk
@@ -170,9 +129,17 @@ async function apiChunked_(payloadText) {
   return await jsonpCall_('__chunkFinish', { key });
 }
 
+
+/****************************************************
+ * INIT
+ ****************************************************/
+
 window.onload = function () {
-  document.getElementById('loginPage').classList.remove('hidden');
-  document.getElementById('appPage').classList.add('hidden');
+  const loginPage = document.getElementById('loginPage');
+  const appPage = document.getElementById('appPage');
+
+  if (loginPage) loginPage.classList.remove('hidden');
+  if (appPage) appPage.classList.add('hidden');
 
   document.addEventListener('click', function (e) {
     const multi = document.getElementById('thanhVienMulti');
@@ -182,63 +149,89 @@ window.onload = function () {
       dropdown.classList.add('hidden');
     }
   });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      closePreview();
+    }
+  });
+
+  const loginPassword = document.getElementById('loginPassword');
+  if (loginPassword) {
+    loginPassword.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') doLogin();
+    });
+  }
 };
 
-async function doLogin() {
-  const username = document.getElementById('loginUsername').value.trim();
-  const password = document.getElementById('loginPassword').value.trim();
-  const msg = document.getElementById('loginMsg');
 
-  if (!username || !password) {
-    msg.innerText = 'Vui lòng nhập đủ tên đăng nhập và mật khẩu.';
-    return;
-  }
+/****************************************************
+ * BUSY / AUTO REFRESH
+ ****************************************************/
 
-  msg.innerText = 'Đang đăng nhập...';
-
-  try {
-    const res = await api('login', { username, password });
-
-    TOKEN = res.token;
-    CURRENT_USER = res.user;
-
-    initApp(res.appData);
-    startAutoRefresh();
-
-    msg.innerText = '';
-  } catch (err) {
-    msg.innerText = 'Lỗi đăng nhập: ' + err.message;
-  }
-}
-
-async function doLogout() {
+function pauseAutoRefresh() {
   if (AUTO_REFRESH_TIMER) {
     clearInterval(AUTO_REFRESH_TIMER);
     AUTO_REFRESH_TIMER = null;
   }
+}
 
-  if (TOKEN) {
-    try {
-      await api('logout', { token: TOKEN });
-    } catch (e) {}
+function resumeAutoRefresh() {
+  if (!TOKEN) return;
+  if (AUTO_REFRESH_TIMER) return;
+
+  startAutoRefresh();
+}
+
+function setBusy(isBusy, message) {
+  IS_BUSY = isBusy;
+
+  const buttons = document.querySelectorAll('button');
+
+  buttons.forEach(btn => {
+    if (btn.classList.contains('nav')) return;
+
+    btn.disabled = isBusy;
+    btn.style.opacity = isBusy ? '0.65' : '';
+    btn.style.cursor = isBusy ? 'not-allowed' : '';
+  });
+
+  const saveBtn = document.getElementById('saveBtn');
+
+  if (saveBtn) {
+    if (isBusy) {
+      saveBtn.dataset.oldText = saveBtn.innerText;
+      saveBtn.innerText = message || 'Đang xử lý...';
+    } else if (saveBtn.dataset.oldText) {
+      saveBtn.innerText = saveBtn.dataset.oldText;
+      delete saveBtn.dataset.oldText;
+    }
   }
 
-  TOKEN = '';
-  CURRENT_USER = null;
-  ACCOUNT_CACHE = [];
-  SELECTED_MEMBERS = [];
-  EDITING_MA_PHIEU = '';
+  const cancelEditBtn = document.getElementById('cancelEditBtn');
+  if (!isBusy && cancelEditBtn) {
+    cancelEditBtn.disabled = false;
+  }
+}
 
-  document.getElementById('appPage').classList.add('hidden');
-  document.getElementById('loginPage').classList.remove('hidden');
+async function runBusy(message, taskFn) {
+  if (IS_BUSY) return;
 
-  document.getElementById('loginUsername').value = '';
-  document.getElementById('loginPassword').value = '';
-  document.getElementById('loginMsg').innerText = '';
+  pauseAutoRefresh();
+  setBusy(true, message);
+
+  try {
+    return await taskFn();
+  } finally {
+    setBusy(false);
+    resumeAutoRefresh();
+  }
 }
 
 function startAutoRefresh() {
-  if (AUTO_REFRESH_TIMER) clearInterval(AUTO_REFRESH_TIMER);
+  if (AUTO_REFRESH_TIMER) {
+    clearInterval(AUTO_REFRESH_TIMER);
+  }
 
   AUTO_REFRESH_TIMER = setInterval(() => {
     if (!TOKEN) return;
@@ -258,19 +251,140 @@ function startAutoRefresh() {
       if (CURRENT_USER && CURRENT_USER.role === 'admin') {
         loadAccounts(true);
       }
-      return;
     }
   }, 30000);
 }
 
+
+/****************************************************
+ * LOGIN / LOGOUT
+ ****************************************************/
+
+async function doLogin() {
+  const username = getValue('loginUsername').trim();
+  const password = getValue('loginPassword').trim();
+  const msg = document.getElementById('loginMsg');
+
+  if (!username || !password) {
+    if (msg) msg.innerText = 'Vui lòng nhập đủ tên đăng nhập và mật khẩu.';
+    return;
+  }
+
+  if (msg) msg.innerText = 'Đang đăng nhập...';
+
+  try {
+    const res = await api('login', {
+      username,
+      password
+    });
+
+    TOKEN = res.token;
+    CURRENT_USER = res.user;
+
+    initApp(res.appData);
+    startAutoRefresh();
+
+    if (msg) msg.innerText = '';
+  } catch (err) {
+    if (msg) msg.innerText = 'Lỗi đăng nhập: ' + err.message;
+  }
+}
+
+async function doLogout() {
+  pauseAutoRefresh();
+
+  if (TOKEN) {
+    try {
+      await api('logout', { token: TOKEN });
+    } catch (e) {}
+  }
+
+  TOKEN = '';
+  CURRENT_USER = null;
+  ACCOUNT_CACHE = [];
+  SELECTED_MEMBERS = [];
+  EDITING_MA_PHIEU = '';
+
+  APP = {
+    may: [],
+    hienTuong: [],
+    vatTu: [],
+    ktv: [],
+    vatTuCoDinh: [],
+    selected: []
+  };
+
+  const appPage = document.getElementById('appPage');
+  const loginPage = document.getElementById('loginPage');
+
+  if (appPage) appPage.classList.add('hidden');
+  if (loginPage) loginPage.classList.remove('hidden');
+
+  setInputValue('loginUsername', '');
+  setInputValue('loginPassword', '');
+
+  const msg = document.getElementById('loginMsg');
+  if (msg) msg.innerText = '';
+}
+
+
+/****************************************************
+ * LOAD APP DATA
+ ****************************************************/
+
 async function loadApp(isAutoRefresh) {
+  if (!TOKEN) return;
+
   try {
     const data = await api('getAppData', { token: TOKEN });
-    if (isAutoRefresh) refreshAppDataOnly(data);
-    else initApp(data);
+
+    if (isAutoRefresh) {
+      refreshAppDataOnly(data);
+    } else {
+      initApp(data);
+    }
   } catch (err) {
     if (!isAutoRefresh) alert(err.message);
   }
+}
+
+function initApp(data) {
+  APP = { ...APP, ...data };
+  CURRENT_USER = data.currentUser;
+
+  const loginPage = document.getElementById('loginPage');
+  const appPage = document.getElementById('appPage');
+
+  if (loginPage) loginPage.classList.add('hidden');
+  if (appPage) appPage.classList.remove('hidden');
+
+  const userBox = document.getElementById('userBox');
+  if (userBox) {
+    userBox.innerHTML = `
+      <b>${escapeHtml(CURRENT_USER.fullName || CURRENT_USER.username)}</b><br>
+      Vai trò: ${escapeHtml(CURRENT_USER.role)}
+    `;
+  }
+
+  const adminNav = document.getElementById('adminNav');
+
+  if (CURRENT_USER.role === 'admin') {
+    if (adminNav) adminNav.classList.remove('hidden');
+    loadAccounts(false);
+  } else {
+    if (adminNav) adminNav.classList.add('hidden');
+  }
+
+  reloadSelectOptionsFromAppData();
+
+  SELECTED_MEMBERS = [];
+  renderMemberMultiSelect();
+
+  setDefaultDateTime();
+  onMayChange();
+
+  renderVatTuCoDinh();
+  loadPhieuList(false);
 }
 
 function refreshAppDataOnly(data) {
@@ -284,69 +398,78 @@ function refreshAppDataOnly(data) {
   APP = { ...APP, ...data };
   CURRENT_USER = data.currentUser;
 
-  const names = getKtvNames();
+  reloadSelectOptionsFromAppData();
 
-  fillSelect('doiTruong', names, '-- Chọn đội trưởng --');
   setSelectValue('doiTruong', oldDoiTruong);
-
   SELECTED_MEMBERS = oldMembers.filter(name => name !== getValue('doiTruong'));
   renderMemberMultiSelect();
 
-  fillSelect('nguoiXuatKho', names, '-- Chọn người xuất kho --');
-  setSelectValue('nguoiXuatKho', oldNguoiXuatKho);
-
-  fillSelect('nguoiNhapKho', names, '-- Chọn người nhập kho --');
-  setSelectValue('nguoiNhapKho', oldNguoiNhapKho);
-
-  fillSelect('maMay', getMayCodes(), '-- Chọn mã máy --');
   setSelectValue('maMay', oldMaMay);
-
-  const hienTuongList = [...new Set(APP.hienTuong.map(x => getValClient(x, ['Hiện Tượng/Sự cố'])).filter(Boolean))];
-  fillSelect('hienTuong', hienTuongList, '-- Chọn hiện tượng --');
   setSelectValue('hienTuong', oldHienTuong);
+  setSelectValue('nguoiXuatKho', oldNguoiXuatKho);
+  setSelectValue('nguoiNhapKho', oldNguoiNhapKho);
 
   onMayChange();
   renderVatTuSearch();
 }
 
-function initApp(data) {
-  APP = { ...APP, ...data };
-  CURRENT_USER = data.currentUser;
-
-  document.getElementById('loginPage').classList.add('hidden');
-  document.getElementById('appPage').classList.remove('hidden');
-
-  document.getElementById('userBox').innerHTML = `
-    <b>${escapeHtml(CURRENT_USER.fullName || CURRENT_USER.username)}</b><br>
-    Vai trò: ${escapeHtml(CURRENT_USER.role)}
-  `;
-
-  if (CURRENT_USER.role === 'admin') {
-    document.getElementById('adminNav').classList.remove('hidden');
-    loadAccounts(false);
-  } else {
-    document.getElementById('adminNav').classList.add('hidden');
-  }
-
+function reloadSelectOptionsFromAppData() {
   const names = getKtvNames();
 
   fillSelect('doiTruong', names, '-- Chọn đội trưởng --');
-  SELECTED_MEMBERS = [];
-  renderMemberMultiSelect();
-
   fillSelect('nguoiXuatKho', names, '-- Chọn người xuất kho --');
   fillSelect('nguoiNhapKho', names, '-- Chọn người nhập kho --');
-
   fillSelect('maMay', getMayCodes(), '-- Chọn mã máy --');
 
-  const hienTuongList = [...new Set(APP.hienTuong.map(x => getValClient(x, ['Hiện Tượng/Sự cố'])).filter(Boolean))];
-  fillSelect('hienTuong', hienTuongList, '-- Chọn hiện tượng --');
+  const hienTuongList = [
+    ...new Set(
+      APP.hienTuong
+        .map(x => getValClient(x, ['Hiện Tượng/Sự cố', 'Hiện tượng/Sự cố', 'Hiện tượng']))
+        .filter(Boolean)
+        .map(x => String(x).trim())
+    )
+  ];
 
-  setDefaultDateTime();
-  onMayChange();
-  renderVatTuCoDinh();
-  loadPhieuList(false);
+  fillSelect('hienTuong', hienTuongList, '-- Chọn hiện tượng --');
 }
+
+
+/****************************************************
+ * TAB
+ ****************************************************/
+
+function showTab(id, btn) {
+  LAST_ACTIVE_TAB = id;
+
+  document.querySelectorAll('.tab').forEach(x => x.classList.add('hidden'));
+
+  const tab = document.getElementById(id);
+  if (tab) tab.classList.remove('hidden');
+
+  document.querySelectorAll('.nav').forEach(x => x.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  if (id === 'adminTab') {
+    loadAccounts(false);
+  }
+
+  if (id === 'historyTab') {
+    loadPhieuList(false);
+  }
+}
+
+function showTabById(id) {
+  const btn = Array.from(document.querySelectorAll('.nav')).find(b => {
+    return b.getAttribute('onclick') && b.getAttribute('onclick').includes(id);
+  });
+
+  showTab(id, btn);
+}
+
+
+/****************************************************
+ * SELECT / DATA HELPERS
+ ****************************************************/
 
 function normKeyClient(s) {
   return String(s || '')
@@ -371,18 +494,20 @@ function getValClient(row, keys) {
 }
 
 function getKtvNames() {
-  let list = APP.ktv.map(row => {
-    return getValClient(row, [
-      'Họ Và Tên',
-      'Họ và tên',
-      'Họ tên',
-      'Tên kỹ thuật',
-      'Tên kỹ thuật viên',
-      'Kỹ thuật viên',
-      'Tên KTV',
-      'Tên'
-    ]);
-  }).filter(Boolean)
+  const list = APP.ktv
+    .map(row => {
+      return getValClient(row, [
+        'Họ Và Tên',
+        'Họ và tên',
+        'Họ tên',
+        'Tên kỹ thuật',
+        'Tên kỹ thuật viên',
+        'Kỹ thuật viên',
+        'Tên KTV',
+        'Tên'
+      ]);
+    })
+    .filter(Boolean)
     .map(x => String(x).trim())
     .filter(x => x && isNaN(Number(x)));
 
@@ -390,34 +515,10 @@ function getKtvNames() {
 }
 
 function getMayCodes() {
-  return APP.may.map(x => getValClient(x, ['Mã Máy', 'Mã máy'])).filter(Boolean);
-}
-
-function setDefaultDateTime() {
-  const now = new Date();
-  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-  document.getElementById('ngayGioXuatKho').value = now.toISOString().slice(0, 16);
-}
-
-function showTab(id, btn) {
-  LAST_ACTIVE_TAB = id;
-
-  document.querySelectorAll('.tab').forEach(x => x.classList.add('hidden'));
-  document.getElementById(id).classList.remove('hidden');
-
-  document.querySelectorAll('.nav').forEach(x => x.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-
-  if (id === 'adminTab') loadAccounts(false);
-  if (id === 'historyTab') loadPhieuList(false);
-}
-
-function showTabById(id) {
-  const btn = Array.from(document.querySelectorAll('.nav')).find(b => {
-    return b.getAttribute('onclick') && b.getAttribute('onclick').includes(id);
-  });
-
-  showTab(id, btn);
+  return APP.may
+    .map(x => getValClient(x, ['Mã Máy', 'Mã máy']))
+    .filter(Boolean)
+    .map(x => String(x).trim());
 }
 
 function fillSelect(id, arr, placeholder) {
@@ -430,7 +531,9 @@ function fillSelect(id, arr, placeholder) {
     html += `<option value="">${escapeHtml(placeholder)}</option>`;
   }
 
-  html += arr.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+  html += arr
+    .map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)
+    .join('');
 
   el.innerHTML = html;
 }
@@ -451,8 +554,207 @@ function getValue(id) {
   return el ? el.value : '';
 }
 
+function setInputValue(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value;
+}
+
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.innerText = value || '';
+}
+
+
+/****************************************************
+ * FORM
+ ****************************************************/
+
+function setDefaultDateTime() {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+
+  const el = document.getElementById('ngayGioXuatKho');
+  if (el) el.value = now.toISOString().slice(0, 16);
+}
+
+function onMayChange() {
+  const maMay = getValue('maMay');
+
+  const m = APP.may.find(x =>
+    String(getValClient(x, ['Mã Máy', 'Mã máy'])).trim() === String(maMay).trim()
+  ) || {};
+
+  setText(
+    'tenTrai',
+    getValClient(m, ['Tên Trang Trại / Đơn Vị', 'Tên trại', 'Tên Trang Trại']) || ''
+  );
+
+  setText(
+    'donVi',
+    getValClient(m, ['Đơn vị hợp tác', 'Đơn vị']) || ''
+  );
+
+  setText(
+    'khuVuc',
+    getValClient(m, ['Khu Vực', 'Khu vực']) || ''
+  );
+
+  setText(
+    'tinhTP',
+    getValClient(m, ['Tỉnh Thành', 'Tỉnh / TP', 'Tỉnh/TP']) || ''
+  );
+}
+
+function onMucDichChange() {
+  const mucDich = getMucDich();
+
+  const boxHienTuong = document.getElementById('boxHienTuong');
+  const boxCuThe = document.getElementById('boxCuThe');
+
+  if (mucDich === 'Bảo dưỡng sửa chữa') {
+    if (boxHienTuong) boxHienTuong.classList.remove('hidden');
+    if (boxCuThe) boxCuThe.classList.add('hidden');
+  } else {
+    if (boxHienTuong) boxHienTuong.classList.add('hidden');
+    if (boxCuThe) boxCuThe.classList.remove('hidden');
+  }
+
+  renderVatTuSearch();
+}
+
+function getMucDich() {
+  const checked = document.querySelector('input[name="mucDich"]:checked');
+  return checked ? checked.value : 'Bảo dưỡng sửa chữa';
+}
+
+function buildCurrentPayload() {
+  const mucDich = getMucDich();
+  const maMay = getValue('maMay');
+
+  const m = APP.may.find(x =>
+    String(getValClient(x, ['Mã Máy', 'Mã máy'])).trim() === String(maMay).trim()
+  ) || {};
+
+  const cuThe = mucDich === 'Bảo dưỡng sửa chữa'
+    ? getValue('hienTuong')
+    : getValue('cuTheNhapTay').trim();
+
+  return {
+    maPhieu: EDITING_MA_PHIEU || '',
+    doiTruong: getValue('doiTruong'),
+    thanhVien: [...SELECTED_MEMBERS],
+    maMay,
+    tenTrai: getValClient(m, ['Tên Trang Trại / Đơn Vị', 'Tên trại', 'Tên Trang Trại']) || '',
+    donVi: getValClient(m, ['Đơn vị hợp tác', 'Đơn vị']) || '',
+    khuVuc: getValClient(m, ['Khu Vực', 'Khu vực']) || '',
+    tinhTP: getValClient(m, ['Tỉnh Thành', 'Tỉnh / TP', 'Tỉnh/TP']) || '',
+    ngayGioXuatKho: getValue('ngayGioXuatKho'),
+    nguoiXuatKho: getValue('nguoiXuatKho'),
+    ngayGioNhapKho: getValue('ngayGioNhapKho'),
+    nguoiNhapKho: getValue('nguoiNhapKho'),
+    mucDich,
+    cuThe,
+    ghiChu: '',
+    items: APP.selected.map(x => ({
+      nguonVatTu: x.nguonVatTu || '',
+      cumLinhKien: x.cumLinhKien || '',
+      tenVatTu: x.tenVatTu || '',
+      maVatTu: x.maVatTu || '',
+      donViTinh: x.donViTinh || '',
+      soLuongCan: x.soLuongCan || '',
+      soLuongXuatKho: x.soLuongXuatKho || '',
+      tinhTrangXuatKho: x.tinhTrangXuatKho || '',
+      soLuongSuDung: x.soLuongSuDung || '',
+      soLuongNhapKho: x.soLuongNhapKho || '',
+      tinhTrangNhapKho: x.tinhTrangNhapKho || '',
+      ghiChu: x.ghiChu || ''
+    }))
+  };
+}
+
+async function save() {
+  return runBusy(EDITING_MA_PHIEU ? 'Đang cập nhật phiếu...' : 'Đang lưu phiếu...', async () => {
+    const payload = buildCurrentPayload();
+
+    try {
+      let res;
+
+      if (EDITING_MA_PHIEU) {
+        res = await api('updatePhieu', {
+          token: TOKEN,
+          maPhieu: EDITING_MA_PHIEU,
+          payload
+        });
+
+        alert('Đã cập nhật phiếu: ' + res.maPhieu);
+      } else {
+        res = await api('savePhieu', {
+          token: TOKEN,
+          payload
+        });
+
+        alert('Đã lưu phiếu: ' + res.maPhieu);
+      }
+
+      await loadPhieuList(false);
+      showTabById('historyTab');
+      resetFormAfterSave();
+
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+}
+
+function resetFormAfterSave() {
+  EDITING_MA_PHIEU = '';
+
+  setText('formTitle', 'Phiếu chuẩn bị vật tư');
+
+  const saveBtn = document.getElementById('saveBtn');
+  if (saveBtn) saveBtn.innerText = 'Lưu phiếu';
+
+  const cancelEditBtn = document.getElementById('cancelEditBtn');
+  if (cancelEditBtn) cancelEditBtn.classList.add('hidden');
+
+  setSelectValue('doiTruong', '');
+
+  SELECTED_MEMBERS = [];
+  renderMemberMultiSelect();
+
+  setSelectValue('maMay', '');
+  onMayChange();
+
+  setSelectValue('nguoiXuatKho', '');
+  setSelectValue('nguoiNhapKho', '');
+
+  setInputValue('ngayGioNhapKho', '');
+  setDefaultDateTime();
+
+  const defaultMucDich = document.querySelector('input[name="mucDich"][value="Bảo dưỡng sửa chữa"]');
+  if (defaultMucDich) defaultMucDich.checked = true;
+
+  onMucDichChange();
+
+  setSelectValue('hienTuong', '');
+  setInputValue('cuTheNhapTay', '');
+  setInputValue('searchVatTu', '');
+
+  renderVatTuCoDinh();
+}
+
+function cancelEdit() {
+  resetFormAfterSave();
+}
+
+
+/****************************************************
+ * MEMBER MULTI SELECT
+ ****************************************************/
+
 function toggleMemberDropdown() {
-  document.getElementById('thanhVienDropdown').classList.toggle('hidden');
+  const dropdown = document.getElementById('thanhVienDropdown');
+  if (dropdown) dropdown.classList.toggle('hidden');
 }
 
 function getAvailableMembers() {
@@ -462,12 +764,15 @@ function getAvailableMembers() {
 
 function renderMemberMultiSelect() {
   const dropdown = document.getElementById('thanhVienDropdown');
+  if (!dropdown) return;
+
   const available = getAvailableMembers();
 
   SELECTED_MEMBERS = SELECTED_MEMBERS.filter(name => available.includes(name));
 
   dropdown.innerHTML = available.map(name => {
     const checked = SELECTED_MEMBERS.includes(name) ? 'checked' : '';
+
     return `
       <label class="multi-option">
         <input type="checkbox" value="${escapeHtml(name)}" ${checked} onchange="onMemberCheckboxChange(this)">
@@ -483,7 +788,9 @@ function onMemberCheckboxChange(cb) {
   const name = cb.value;
 
   if (cb.checked) {
-    if (!SELECTED_MEMBERS.includes(name)) SELECTED_MEMBERS.push(name);
+    if (!SELECTED_MEMBERS.includes(name)) {
+      SELECTED_MEMBERS.push(name);
+    }
   } else {
     SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== name);
   }
@@ -493,6 +800,7 @@ function onMemberCheckboxChange(cb) {
 
 function updateMemberText() {
   const text = document.getElementById('thanhVienText');
+  if (!text) return;
 
   if (!SELECTED_MEMBERS.length) {
     text.innerText = 'Chọn thành viên';
@@ -505,46 +813,30 @@ function updateMemberText() {
 
 function onDoiTruongChange() {
   const doiTruong = getValue('doiTruong');
+
   SELECTED_MEMBERS = SELECTED_MEMBERS.filter(name => name !== doiTruong);
+
   renderMemberMultiSelect();
 }
 
-function onMayChange() {
-  const maMay = getValue('maMay');
-  const m = APP.may.find(x => String(getValClient(x, ['Mã Máy', 'Mã máy'])) === String(maMay)) || {};
 
-  document.getElementById('tenTrai').innerText = getValClient(m, ['Tên Trang Trại / Đơn Vị', 'Tên trại', 'Tên Trang Trại']) || '';
-  document.getElementById('donVi').innerText = getValClient(m, ['Đơn vị hợp tác', 'Đơn vị']) || '';
-  document.getElementById('khuVuc').innerText = getValClient(m, ['Khu Vực', 'Khu vực']) || '';
-  document.getElementById('tinhTP').innerText = getValClient(m, ['Tỉnh Thành', 'Tỉnh / TP', 'Tỉnh/TP']) || '';
-}
-
-function onMucDichChange() {
-  const mucDich = getMucDich();
-
-  if (mucDich === 'Bảo dưỡng sửa chữa') {
-    document.getElementById('boxHienTuong').classList.remove('hidden');
-    document.getElementById('boxCuThe').classList.add('hidden');
-  } else {
-    document.getElementById('boxHienTuong').classList.add('hidden');
-    document.getElementById('boxCuThe').classList.remove('hidden');
-  }
-
-  renderVatTuSearch();
-}
-
-function getMucDich() {
-  return document.querySelector('input[name="mucDich"]:checked').value;
-}
+/****************************************************
+ * VAT TU
+ ****************************************************/
 
 function renderVatTuCoDinh() {
   APP.selected = [];
 
   APP.vatTuCoDinh.forEach((v, i) => {
-    const ten = getValClient(v, ['Tên Chi Tiết / Linh Kiện Thay Thế', 'Hạng mục vật tư', 'Tên vật tư']);
+    const ten = getValClient(v, [
+      'Tên Chi Tiết / Linh Kiện Thay Thế',
+      'Hạng mục vật tư',
+      'Tên vật tư'
+    ]);
+
     const cum = getValClient(v, ['Cụm Linh Kiện', 'Cụm linh kiện']);
     const maVT = getValClient(v, ['Mã Vật Tư', 'Mã vật tư']);
-    const dvt = getValClient(v, ['Đơn vị tính']);
+    const dvt = getValClient(v, ['Đơn vị tính', 'ĐVT']);
 
     if (!ten) return;
 
@@ -586,15 +878,20 @@ function renderVatTuSearch() {
     const ht = getValue('hienTuong');
 
     cumLienQuan = APP.hienTuong
-      .filter(x => getValClient(x, ['Hiện Tượng/Sự cố']) === ht)
-      .map(x => getValClient(x, ['Cụm Linh Kiện Liên Quan']))
+      .filter(x => getValClient(x, ['Hiện Tượng/Sự cố', 'Hiện tượng/Sự cố', 'Hiện tượng']) === ht)
+      .map(x => getValClient(x, ['Cụm Linh Kiện Liên Quan', 'Cụm Linh Kiện', 'Cụm linh kiện']))
       .filter(Boolean);
   }
 
   const selectedNames = new Set(APP.selected.map(x => normalizeName(x.tenVatTu)));
 
   const list = APP.vatTu.filter(v => {
-    const ten = getValClient(v, ['Tên Chi Tiết / Linh Kiện Thay Thế', 'Hạng mục vật tư', 'Tên vật tư']);
+    const ten = getValClient(v, [
+      'Tên Chi Tiết / Linh Kiện Thay Thế',
+      'Hạng mục vật tư',
+      'Tên vật tư'
+    ]);
+
     const cum = getValClient(v, ['Cụm Linh Kiện', 'Cụm linh kiện']);
 
     if (!ten) return false;
@@ -611,17 +908,27 @@ function renderVatTuSearch() {
 
   if (!list.length) {
     box.classList.remove('hidden');
-    box.innerHTML = '<div class="suggest-row"><div></div><div>Không tìm thấy vật tư phù hợp.</div></div>';
+    box.innerHTML = `
+      <div class="suggest-row">
+        <div></div>
+        <div>Không tìm thấy vật tư phù hợp.</div>
+      </div>
+    `;
     return;
   }
 
   box.classList.remove('hidden');
 
   box.innerHTML = list.map((v, i) => {
-    const ten = getValClient(v, ['Tên Chi Tiết / Linh Kiện Thay Thế', 'Hạng mục vật tư', 'Tên vật tư']);
+    const ten = getValClient(v, [
+      'Tên Chi Tiết / Linh Kiện Thay Thế',
+      'Hạng mục vật tư',
+      'Tên vật tư'
+    ]);
+
     const cum = getValClient(v, ['Cụm Linh Kiện', 'Cụm linh kiện']);
     const maVT = getValClient(v, ['Mã Vật Tư', 'Mã vật tư']);
-    const dvt = getValClient(v, ['Đơn vị tính']);
+    const dvt = getValClient(v, ['Đơn vị tính', 'ĐVT']);
     const id = 'search_' + i + '_' + safeId(ten);
 
     return `
@@ -666,15 +973,20 @@ function addVatTuFromSearch(cb) {
     ghiChu: ''
   });
 
-  document.getElementById('searchVatTu').value = '';
-  document.getElementById('vatTuSearchList').classList.add('hidden');
-  document.getElementById('vatTuSearchList').innerHTML = '';
+  setInputValue('searchVatTu', '');
+
+  const box = document.getElementById('vatTuSearchList');
+  if (box) {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+  }
 
   renderSelected();
 }
 
 function renderSelected() {
   const box = document.getElementById('selectedItems');
+  if (!box) return;
 
   if (!APP.selected.length) {
     box.innerHTML = '<i>Chưa chọn vật tư.</i>';
@@ -706,107 +1018,21 @@ function removeSelectedVatTu(index) {
 }
 
 function updateSelectedQty(index, value) {
-  if (APP.selected[index]) APP.selected[index].soLuongCan = value;
+  if (APP.selected[index]) {
+    APP.selected[index].soLuongCan = value;
+  }
 }
 
 function updateSelectedStatus(index, value) {
-  if (APP.selected[index]) APP.selected[index].tinhTrangXuatKho = value;
+  if (APP.selected[index]) {
+    APP.selected[index].tinhTrangXuatKho = value;
+  }
 }
 
-function buildCurrentPayload() {
-  const mucDich = getMucDich();
-  const maMay = getValue('maMay');
-  const m = APP.may.find(x => String(getValClient(x, ['Mã Máy', 'Mã máy'])) === String(maMay)) || {};
 
-  const cuThe = mucDich === 'Bảo dưỡng sửa chữa'
-    ? getValue('hienTuong')
-    : document.getElementById('cuTheNhapTay').value.trim();
-
-  return {
-    maPhieu: EDITING_MA_PHIEU || '',
-    doiTruong: getValue('doiTruong'),
-    thanhVien: [...SELECTED_MEMBERS],
-    maMay,
-    tenTrai: getValClient(m, ['Tên Trang Trại / Đơn Vị', 'Tên trại', 'Tên Trang Trại']),
-    donVi: getValClient(m, ['Đơn vị hợp tác', 'Đơn vị']),
-    khuVuc: getValClient(m, ['Khu Vực', 'Khu vực']),
-    tinhTP: getValClient(m, ['Tỉnh Thành', 'Tỉnh / TP', 'Tỉnh/TP']),
-    ngayGioXuatKho: getValue('ngayGioXuatKho'),
-    nguoiXuatKho: getValue('nguoiXuatKho'),
-    ngayGioNhapKho: getValue('ngayGioNhapKho'),
-    nguoiNhapKho: getValue('nguoiNhapKho'),
-    mucDich,
-    cuThe,
-    ghiChu: '',
-    items: APP.selected
-  };
-}
-
-async function save() {
-  return runBusy(EDITING_MA_PHIEU ? 'Đang cập nhật phiếu...' : 'Đang lưu phiếu...', async () => {
-    const payload = buildCurrentPayload();
-
-    try {
-      let res;
-
-      if (EDITING_MA_PHIEU) {
-        res = await api('updatePhieu', {
-          token: TOKEN,
-          maPhieu: EDITING_MA_PHIEU,
-          payload
-        });
-
-        alert('Đã cập nhật phiếu: ' + res.maPhieu);
-      } else {
-        res = await api('savePhieu', {
-          token: TOKEN,
-          payload
-        });
-
-        alert('Đã lưu phiếu: ' + res.maPhieu);
-      }
-
-      await loadPhieuList(false);
-      showTabById('historyTab');
-      resetFormAfterSave();
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-}
-
-function resetFormAfterSave() {
-  EDITING_MA_PHIEU = '';
-  document.getElementById('formTitle').innerText = 'Phiếu chuẩn bị vật tư';
-  document.getElementById('saveBtn').innerText = 'Lưu phiếu';
-  document.getElementById('cancelEditBtn').classList.add('hidden');
-
-  setSelectValue('doiTruong', '');
-  SELECTED_MEMBERS = [];
-  renderMemberMultiSelect();
-
-  setSelectValue('maMay', '');
-  onMayChange();
-
-  setSelectValue('nguoiXuatKho', '');
-  setSelectValue('nguoiNhapKho', '');
-  document.getElementById('ngayGioNhapKho').value = '';
-
-  setDefaultDateTime();
-
-  document.querySelector('input[name="mucDich"][value="Bảo dưỡng sửa chữa"]').checked = true;
-  onMucDichChange();
-  setSelectValue('hienTuong', '');
-
-  document.getElementById('cuTheNhapTay').value = '';
-  document.getElementById('searchVatTu').value = '';
-
-  renderVatTuCoDinh();
-}
-
-function cancelEdit() {
-  resetFormAfterSave();
-}
+/****************************************************
+ * PHIEU LIST / PREVIEW / EXPORT / EDIT / DELETE
+ ****************************************************/
 
 async function loadPhieuList(isAutoRefresh) {
   if (!TOKEN) return;
@@ -814,7 +1040,9 @@ async function loadPhieuList(isAutoRefresh) {
   const box = document.getElementById('phieuList');
   if (!box) return;
 
-  if (!isAutoRefresh) box.innerHTML = '<i>Đang tải danh sách phiếu...</i>';
+  if (!isAutoRefresh) {
+    box.innerHTML = '<i>Đang tải danh sách phiếu...</i>';
+  }
 
   try {
     const list = await api('listPhieu', { token: TOKEN });
@@ -828,6 +1056,7 @@ async function loadPhieuList(isAutoRefresh) {
 
 function renderPhieuList(list) {
   const box = document.getElementById('phieuList');
+  if (!box) return;
 
   if (!list || !list.length) {
     box.innerHTML = '<i>Chưa có phiếu nào.</i>';
@@ -883,6 +1112,7 @@ async function previewCurrentForm() {
     try {
       const payload = buildCurrentPayload();
       const html = renderPreviewHtmlClient(payload);
+
       openPreview(html);
     } catch (err) {
       alert(err.message);
@@ -909,13 +1139,18 @@ function openPreview(html) {
   const modal = document.getElementById('previewModal');
   const frame = document.getElementById('previewFrame');
 
+  if (!modal || !frame) return;
+
   modal.classList.remove('hidden');
   frame.srcdoc = html;
 }
 
 function closePreview() {
-  document.getElementById('previewModal').classList.add('hidden');
-  document.getElementById('previewFrame').srcdoc = '';
+  const modal = document.getElementById('previewModal');
+  const frame = document.getElementById('previewFrame');
+
+  if (modal) modal.classList.add('hidden');
+  if (frame) frame.srcdoc = '';
 }
 
 async function exportPdf(maPhieu) {
@@ -926,7 +1161,8 @@ async function exportPdf(maPhieu) {
         maPhieu
       });
 
-      window.open(url, '_blank');
+      openDriveUrl(url);
+      await loadPhieuList(true);
     } catch (err) {
       alert(err.message);
     }
@@ -941,24 +1177,37 @@ async function exportWord(maPhieu) {
         maPhieu
       });
 
-      window.open(url, '_blank');
+      openDriveUrl(url);
+      await loadPhieuList(true);
     } catch (err) {
       alert(err.message);
     }
   });
 }
 
-async function editPhieu(maPhieu) {
-  try {
-    const data = await api('getPhieuDetail', {
-      token: TOKEN,
-      maPhieu
-    });
-    loadPhieuToForm(data);
-    showTabById('formTab');
-  } catch (err) {
-    alert(err.message);
+function openDriveUrl(url) {
+  if (!url) {
+    alert('Không nhận được link file.');
+    return;
   }
+
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+async function editPhieu(maPhieu) {
+  return runBusy('Đang tải phiếu...', async () => {
+    try {
+      const data = await api('getPhieuDetail', {
+        token: TOKEN,
+        maPhieu
+      });
+
+      loadPhieuToForm(data);
+      showTabById('formTab');
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 async function deletePhieuUI(maPhieu) {
@@ -990,9 +1239,13 @@ function loadPhieuToForm(data) {
 
   EDITING_MA_PHIEU = p.maPhieu || '';
 
-  document.getElementById('formTitle').innerText = 'Chỉnh sửa phiếu: ' + EDITING_MA_PHIEU;
-  document.getElementById('saveBtn').innerText = 'Cập nhật phiếu';
-  document.getElementById('cancelEditBtn').classList.remove('hidden');
+  setText('formTitle', 'Chỉnh sửa phiếu: ' + EDITING_MA_PHIEU);
+
+  const saveBtn = document.getElementById('saveBtn');
+  if (saveBtn) saveBtn.innerText = 'Cập nhật phiếu';
+
+  const cancelEditBtn = document.getElementById('cancelEditBtn');
+  if (cancelEditBtn) cancelEditBtn.classList.remove('hidden');
 
   setSelectValue('doiTruong', p.doiTruong || '');
 
@@ -1000,6 +1253,7 @@ function loadPhieuToForm(data) {
     .split(';')
     .map(x => x.trim())
     .filter(Boolean);
+
   renderMemberMultiSelect();
 
   setSelectValue('maMay', p.maMay || '');
@@ -1008,18 +1262,20 @@ function loadPhieuToForm(data) {
   setSelectValue('nguoiXuatKho', p.nguoiXuatKho || '');
   setSelectValue('nguoiNhapKho', p.nguoiNhapKho || '');
 
-  document.getElementById('ngayGioXuatKho').value = toDatetimeLocalValue(p.ngayGioXuatKho);
-  document.getElementById('ngayGioNhapKho').value = toDatetimeLocalValue(p.ngayGioNhapKho);
+  setInputValue('ngayGioXuatKho', toDatetimeLocalValue(p.ngayGioXuatKho));
+  setInputValue('ngayGioNhapKho', toDatetimeLocalValue(p.ngayGioNhapKho));
 
   const mucDich = p.mucDich || 'Bảo dưỡng sửa chữa';
   const radio = document.querySelector(`input[name="mucDich"][value="${mucDich}"]`);
+
   if (radio) radio.checked = true;
+
   onMucDichChange();
 
   if (mucDich === 'Bảo dưỡng sửa chữa') {
     setSelectValue('hienTuong', p.cuThe || '');
   } else {
-    document.getElementById('cuTheNhapTay').value = p.cuThe || '';
+    setInputValue('cuTheNhapTay', p.cuThe || '');
   }
 
   APP.selected = items.map((x, i) => ({
@@ -1042,21 +1298,36 @@ function toDatetimeLocalValue(v) {
 
   const s = String(v).trim();
 
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return s.slice(0, 16);
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) return s.replace(' ', 'T').slice(0, 16);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) {
+    return s.slice(0, 16);
+  }
+
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) {
+    return s.replace(' ', 'T').slice(0, 16);
+  }
 
   const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`;
+
+  if (m) {
+    return `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`;
+  }
 
   return '';
 }
+
+
+/****************************************************
+ * ACCOUNT ADMIN
+ ****************************************************/
 
 async function loadAccounts(isAutoRefresh) {
   if (!CURRENT_USER || CURRENT_USER.role !== 'admin') return;
 
   const box = document.getElementById('accountList');
 
-  if (!isAutoRefresh && box) box.innerHTML = '<i>Đang tải danh sách tài khoản...</i>';
+  if (!isAutoRefresh && box) {
+    box.innerHTML = '<i>Đang tải danh sách tài khoản...</i>';
+  }
 
   try {
     const list = await api('listAccounts', { token: TOKEN });
@@ -1070,7 +1341,9 @@ async function loadAccounts(isAutoRefresh) {
 
 function renderAccounts(list) {
   ACCOUNT_CACHE = list || [];
+
   const box = document.getElementById('accountList');
+  if (!box) return;
 
   if (!ACCOUNT_CACHE.length) {
     box.innerHTML = '<i>Chưa có tài khoản.</i>';
@@ -1087,9 +1360,13 @@ function renderAccounts(list) {
         <button class="small-btn danger" onclick="toggleAccount(${acc.rowNumber}, 'locked')">Từ chối</button>
       `;
     } else if (status === 'active') {
-      actionBtn = `<button class="small-btn secondary" onclick="toggleAccount(${acc.rowNumber}, 'locked')">Khóa</button>`;
+      actionBtn = `
+        <button class="small-btn secondary" onclick="toggleAccount(${acc.rowNumber}, 'locked')">Khóa</button>
+      `;
     } else {
-      actionBtn = `<button class="small-btn" onclick="toggleAccount(${acc.rowNumber}, 'active')">Mở</button>`;
+      actionBtn = `
+        <button class="small-btn" onclick="toggleAccount(${acc.rowNumber}, 'active')">Mở</button>
+      `;
     }
 
     return `
@@ -1111,6 +1388,7 @@ function renderStatusBadge(status) {
   if (status === 'active') return '<span class="badge badge-active">active</span>';
   if (status === 'pending') return '<span class="badge badge-pending">pending</span>';
   if (status === 'locked') return '<span class="badge badge-locked">locked</span>';
+
   return '<span class="badge">' + escapeHtml(status) + '</span>';
 }
 
@@ -1118,85 +1396,80 @@ function editAccountByIndex(index) {
   const acc = ACCOUNT_CACHE[index];
   if (!acc) return;
 
-  document.getElementById('accRow').value = acc.rowNumber || '';
-  document.getElementById('accUsername').value = acc.username || '';
-  document.getElementById('accPassword').value = '';
-  document.getElementById('accFullName').value = acc.fullName || '';
-  document.getElementById('accRole').value = acc.role || 'ktv';
-  document.getElementById('accStatus').value = acc.status || 'active';
-  document.getElementById('accNote').value = acc.note || '';
+  setInputValue('accRow', acc.rowNumber || '');
+  setInputValue('accUsername', acc.username || '');
+  setInputValue('accPassword', '');
+  setInputValue('accFullName', acc.fullName || '');
+  setInputValue('accRole', acc.role || 'ktv');
+  setInputValue('accStatus', acc.status || 'active');
+  setInputValue('accNote', acc.note || '');
 }
 
 function clearAccountForm() {
-  document.getElementById('accRow').value = '';
-  document.getElementById('accUsername').value = '';
-  document.getElementById('accPassword').value = '';
-  document.getElementById('accFullName').value = '';
-  document.getElementById('accRole').value = 'ktv';
-  document.getElementById('accStatus').value = 'active';
-  document.getElementById('accNote').value = '';
+  setInputValue('accRow', '');
+  setInputValue('accUsername', '');
+  setInputValue('accPassword', '');
+  setInputValue('accFullName', '');
+  setInputValue('accRole', 'ktv');
+  setInputValue('accStatus', 'active');
+  setInputValue('accNote', '');
 }
 
 async function saveAccountUI() {
   const account = {
-    rowNumber: document.getElementById('accRow').value,
-    username: document.getElementById('accUsername').value.trim(),
-    password: document.getElementById('accPassword').value.trim(),
-    fullName: document.getElementById('accFullName').value.trim(),
-    role: document.getElementById('accRole').value,
-    status: document.getElementById('accStatus').value,
-    note: document.getElementById('accNote').value.trim()
+    rowNumber: getValue('accRow'),
+    username: getValue('accUsername').trim(),
+    password: getValue('accPassword').trim(),
+    fullName: getValue('accFullName').trim(),
+    role: getValue('accRole'),
+    status: getValue('accStatus'),
+    note: getValue('accNote').trim()
   };
 
-  try {
-    const res = await api('saveAccount', {
-      token: TOKEN,
-      account
-    });
-    alert(res.message || 'Đã lưu tài khoản.');
-    clearAccountForm();
-    loadAccounts(false);
-  } catch (err) {
-    alert(err.message);
-  }
+  return runBusy('Đang lưu tài khoản...', async () => {
+    try {
+      const res = await api('saveAccount', {
+        token: TOKEN,
+        account
+      });
+
+      alert(res.message || 'Đã lưu tài khoản.');
+      clearAccountForm();
+      await loadAccounts(false);
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 async function toggleAccount(rowNumber, status) {
-  try {
-    await api('setAccountStatus', {
-      token: TOKEN,
-      rowNumber,
-      status
-    });
-    loadAccounts(false);
-  } catch (err) {
-    alert(err.message);
-  }
+  return runBusy('Đang cập nhật tài khoản...', async () => {
+    try {
+      await api('setAccountStatus', {
+        token: TOKEN,
+        rowNumber,
+        status
+      });
+
+      await loadAccounts(false);
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
-function normalizeName(s) {
-  return removeTone(String(s || '').trim().toLowerCase());
-}
 
-function removeTone(str) {
-  return String(str || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/Đ/g, 'D');
-}
-
-function safeId(str) {
-  return removeTone(String(str || ''))
-    .replace(/[^a-zA-Z0-9]/g, '_')
-    .slice(0, 40);
-}
+/****************************************************
+ * PREVIEW HTML CLIENT
+ ****************************************************/
 
 function renderPreviewHtmlClient(payload) {
   const phieu = {
     maPhieu: payload.maPhieu || 'BẢN XEM TRƯỚC',
     doiTruong: payload.doiTruong || '',
-    thanhVien: Array.isArray(payload.thanhVien) ? payload.thanhVien.join('; ') : payload.thanhVien || '',
+    thanhVien: Array.isArray(payload.thanhVien)
+      ? payload.thanhVien.join('; ')
+      : payload.thanhVien || '',
     maMay: payload.maMay || '',
     tenTrai: payload.tenTrai || '',
     ngayGioXuatKho: payload.ngayGioXuatKho || '',
@@ -1213,7 +1486,12 @@ function renderPreviewHtmlClient(payload) {
     const checkedMoi = tt === 'Mới' ? '✓' : '';
     const checkedCu = tt === 'Cũ' ? '✓' : '';
     const checkedTot = tt === 'Tốt' ? '✓' : '';
-    const checkedKxd = tt === 'K.xđ' || tt === 'KXĐ' || tt === 'Không xác định' ? '✓' : '';
+    const checkedKxd =
+      tt === 'K.xđ' ||
+      tt === 'KXĐ' ||
+      tt === 'Không xác định'
+        ? '✓'
+        : '';
 
     return `
       <tr>
@@ -1450,7 +1728,7 @@ function renderPreviewHtmlClient(payload) {
   <table class="vt-table">
     <thead>
       <tr>
-        <th rowspan="2" class="col-stt">TT</th>
+        <th rowspan="2" class="col-stt">STT</th>
         <th rowspan="2" class="col-name">Hạng mục vật tư</th>
         <th rowspan="2" class="col-small">Số lượng<br>cần</th>
         <th rowspan="2" class="col-small">Số lượng<br>xuất kho</th>
@@ -1492,6 +1770,29 @@ function renderPreviewHtmlClient(payload) {
 </div>
 </body>
 </html>`;
+}
+
+
+/****************************************************
+ * UTILS
+ ****************************************************/
+
+function normalizeName(s) {
+  return removeTone(String(s || '').trim().toLowerCase());
+}
+
+function removeTone(str) {
+  return String(str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D');
+}
+
+function safeId(str) {
+  return removeTone(String(str || ''))
+    .replace(/[^a-zA-Z0-9]/g, '_')
+    .slice(0, 40);
 }
 
 function escapeHtml(str) {
