@@ -1,4 +1,4 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbwVttw8K3olLd89xZaEP6TWCVhckXaMc9x0ZWXYi9-RWWdOR0fa02SiVAYkO_cGDi-h/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbykEYJqDRdl3_QqlfDLN_HI2IDlhDcA-96ZrjwxaKnoHC8QiKyXWill9zwYtPDffm3a/exec';
 
 let TOKEN = '';
 let CURRENT_USER = null;
