@@ -29,6 +29,61 @@ function api(action, data = {}) {
   // Nếu dữ liệu lớn, chia nhỏ để gửi lên Apps Script
   return apiChunked_(payloadText);
 }
+function pauseAutoRefresh() {
+  if (AUTO_REFRESH_TIMER) {
+    clearInterval(AUTO_REFRESH_TIMER);
+    AUTO_REFRESH_TIMER = null;
+  }
+}
+
+function resumeAutoRefresh() {
+  if (!TOKEN) return;
+  if (AUTO_REFRESH_TIMER) return;
+  startAutoRefresh();
+}
+
+function setBusy(isBusy, message) {
+  IS_BUSY = isBusy;
+
+  const saveBtn = document.getElementById('saveBtn');
+  const cancelEditBtn = document.getElementById('cancelEditBtn');
+
+  const buttons = document.querySelectorAll('button');
+  buttons.forEach(btn => {
+    if (btn.classList.contains('nav')) return;
+    btn.disabled = isBusy;
+    btn.style.opacity = isBusy ? '0.65' : '';
+    btn.style.cursor = isBusy ? 'not-allowed' : '';
+  });
+
+  if (saveBtn) {
+    if (isBusy) {
+      saveBtn.dataset.oldText = saveBtn.innerText;
+      saveBtn.innerText = message || 'Đang xử lý...';
+    } else if (saveBtn.dataset.oldText) {
+      saveBtn.innerText = saveBtn.dataset.oldText;
+      delete saveBtn.dataset.oldText;
+    }
+  }
+
+  if (!isBusy && cancelEditBtn) {
+    cancelEditBtn.disabled = false;
+  }
+}
+
+async function runBusy(message, taskFn) {
+  if (IS_BUSY) return;
+
+  pauseAutoRefresh();
+  setBusy(true, message);
+
+  try {
+    return await taskFn();
+  } finally {
+    setBusy(false);
+    resumeAutoRefresh();
+  }
+}
 
 function jsonpCall_(action, data = {}) {
   return new Promise((resolve, reject) => {
@@ -187,12 +242,23 @@ function startAutoRefresh() {
 
   AUTO_REFRESH_TIMER = setInterval(() => {
     if (!TOKEN) return;
+    if (IS_BUSY) return;
 
-    loadApp(true);
-    loadPhieuList(true);
+    if (LAST_ACTIVE_TAB === 'formTab') {
+      loadApp(true);
+      return;
+    }
 
-    if (CURRENT_USER && CURRENT_USER.role === 'admin') {
-      loadAccounts(true);
+    if (LAST_ACTIVE_TAB === 'historyTab') {
+      loadPhieuList(true);
+      return;
+    }
+
+    if (LAST_ACTIVE_TAB === 'adminTab') {
+      if (CURRENT_USER && CURRENT_USER.role === 'admin') {
+        loadAccounts(true);
+      }
+      return;
     }
   }, 30000);
 }
@@ -334,6 +400,8 @@ function setDefaultDateTime() {
 }
 
 function showTab(id, btn) {
+  LAST_ACTIVE_TAB = id;
+
   document.querySelectorAll('.tab').forEach(x => x.classList.add('hidden'));
   document.getElementById(id).classList.remove('hidden');
 
@@ -675,32 +743,36 @@ function buildCurrentPayload() {
 }
 
 async function save() {
-  const payload = buildCurrentPayload();
+  return runBusy(EDITING_MA_PHIEU ? 'Đang cập nhật phiếu...' : 'Đang lưu phiếu...', async () => {
+    const payload = buildCurrentPayload();
 
-  try {
-    let res;
+    try {
+      let res;
 
-    if (EDITING_MA_PHIEU) {
-      res = await api('updatePhieu', {
-        token: TOKEN,
-        maPhieu: EDITING_MA_PHIEU,
-        payload
-      });
-      alert('Đã cập nhật phiếu: ' + res.maPhieu);
-    } else {
-      res = await api('savePhieu', {
-        token: TOKEN,
-        payload
-      });
-      alert('Đã lưu phiếu: ' + res.maPhieu);
+      if (EDITING_MA_PHIEU) {
+        res = await api('updatePhieu', {
+          token: TOKEN,
+          maPhieu: EDITING_MA_PHIEU,
+          payload
+        });
+
+        alert('Đã cập nhật phiếu: ' + res.maPhieu);
+      } else {
+        res = await api('savePhieu', {
+          token: TOKEN,
+          payload
+        });
+
+        alert('Đã lưu phiếu: ' + res.maPhieu);
+      }
+
+      await loadPhieuList(false);
+      showTabById('historyTab');
+      resetFormAfterSave();
+    } catch (err) {
+      alert(err.message);
     }
-
-    await loadPhieuList(false);
-    showTabById('historyTab');
-    resetFormAfterSave();
-  } catch (err) {
-    alert(err.message);
-  }
+  });
 }
 
 function resetFormAfterSave() {
@@ -806,27 +878,33 @@ function renderPhieuList(list) {
 }
 
 async function previewCurrentForm() {
-  try {
-    const html = await api('previewDraft', {
-      token: TOKEN,
-      payload: buildCurrentPayload()
-    });
-    openPreview(html);
-  } catch (err) {
-    alert(err.message);
-  }
+  return runBusy('Đang xem trước...', async () => {
+    try {
+      const html = await api('previewDraft', {
+        token: TOKEN,
+        payload: buildCurrentPayload()
+      });
+
+      openPreview(html);
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 async function previewSavedPhieu(maPhieu) {
-  try {
-    const html = await api('previewPhieu', {
-      token: TOKEN,
-      maPhieu
-    });
-    openPreview(html);
-  } catch (err) {
-    alert(err.message);
-  }
+  return runBusy('Đang xem trước...', async () => {
+    try {
+      const html = await api('previewPhieu', {
+        token: TOKEN,
+        maPhieu
+      });
+
+      openPreview(html);
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 function openPreview(html) {
@@ -843,27 +921,33 @@ function closePreview() {
 }
 
 async function exportPdf(maPhieu) {
-  try {
-    const url = await api('exportPhieuPdf', {
-      token: TOKEN,
-      maPhieu
-    });
-    window.open(url, '_blank');
-  } catch (err) {
-    alert(err.message);
-  }
+  return runBusy('Đang tạo PDF...', async () => {
+    try {
+      const url = await api('exportPhieuPdf', {
+        token: TOKEN,
+        maPhieu
+      });
+
+      window.open(url, '_blank');
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 async function exportWord(maPhieu) {
-  try {
-    const url = await api('exportPhieuWord', {
-      token: TOKEN,
-      maPhieu
-    });
-    window.open(url, '_blank');
-  } catch (err) {
-    alert(err.message);
-  }
+  return runBusy('Đang tạo Word...', async () => {
+    try {
+      const url = await api('exportPhieuWord', {
+        token: TOKEN,
+        maPhieu
+      });
+
+      window.open(url, '_blank');
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 async function editPhieu(maPhieu) {
