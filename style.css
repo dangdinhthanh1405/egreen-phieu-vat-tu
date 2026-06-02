@@ -99,6 +99,34 @@ button {
   margin-top: 14px;
 }
 
+.login-card input {
+  margin-bottom: 2px;
+}
+
+.remember-row {
+  display: flex !important;
+  align-items: center;
+  gap: 9px;
+  margin-top: 13px !important;
+  margin-bottom: 0 !important;
+  cursor: pointer;
+  font-weight: 600 !important;
+  color: var(--text);
+  user-select: none;
+}
+
+.remember-row input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+
+.remember-row span {
+  font-size: 14px;
+}
+
 .login-card button {
   width: 100%;
   padding: 14px;
@@ -307,6 +335,7 @@ textarea:disabled {
 .radio-row input {
   width: auto;
   margin: 0;
+  accent-color: var(--green);
 }
 
 .hint {
@@ -381,6 +410,7 @@ textarea:disabled {
 .multi-option input {
   width: auto;
   margin: 0;
+  accent-color: var(--green);
 }
 
 /* =========================
@@ -392,9 +422,30 @@ textarea:disabled {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: white;
-  max-height: 320px;
+  max-height: 360px;
   overflow-y: auto;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
+}
+
+.suggest-group {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.suggest-group:last-child {
+  border-bottom: none;
+}
+
+.suggest-group-title {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--green-light);
+  color: var(--green-dark);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .suggest-row {
@@ -414,10 +465,16 @@ textarea:disabled {
   background: #f8fafc;
 }
 
+.suggest-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .suggest-row input[type="checkbox"] {
   width: 18px;
   height: 18px;
   margin: 0;
+  accent-color: var(--green);
 }
 
 .suggest-row input[type="number"],
@@ -443,6 +500,7 @@ textarea:disabled {
   width: 18px;
   height: 18px;
   margin: 0;
+  accent-color: var(--green);
 }
 
 .item-row input[type="number"],
@@ -798,6 +856,10 @@ button:disabled {
   .item-row input[type="number"],
   .item-row select {
     grid-column: 2;
+  }
+
+  .suggest-box {
+    max-height: 420px;
   }
 
   .suggest-row {
