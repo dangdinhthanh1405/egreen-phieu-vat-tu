@@ -17,6 +17,18 @@ let APP = {
 };
 
 function api(action, data = {}) {
+  const payloadText = JSON.stringify({ action, data });
+
+  // Nếu dữ liệu nhỏ thì gọi JSONP bình thường
+  if (payloadText.length <= 1500) {
+    return jsonpCall_(action, data);
+  }
+
+  // Nếu dữ liệu lớn, chia nhỏ để gửi lên Apps Script
+  return apiChunked_(payloadText);
+}
+
+function jsonpCall_(action, data = {}) {
   return new Promise((resolve, reject) => {
     const callbackName =
       '__egreen_cb_' +
@@ -77,6 +89,28 @@ function api(action, data = {}) {
 
     document.body.appendChild(script);
   });
+}
+
+async function apiChunked_(payloadText) {
+  const key =
+    'k_' +
+    Date.now() +
+    '_' +
+    Math.random().toString(36).slice(2);
+
+  const chunkSize = 1200;
+
+  await jsonpCall_('__chunkStart', { key });
+
+  for (let i = 0; i < payloadText.length; i += chunkSize) {
+    const chunk = payloadText.slice(i, i + chunkSize);
+    await jsonpCall_('__chunkAppend', {
+      key,
+      chunk
+    });
+  }
+
+  return await jsonpCall_('__chunkFinish', { key });
 }
 
 window.onload = function () {
