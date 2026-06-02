@@ -7,7 +7,7 @@
   <meta name="description" content="eGreen - Hệ thống tạo phiếu chuẩn bị vật tư">
   <title>eGreen - Phiếu vật tư</title>
 
-  <link rel="stylesheet" href="style.css?v=15">
+  <link rel="stylesheet" href="style.css?v=16">
 </head>
 
 <body>
@@ -33,6 +33,15 @@
         autocomplete="current-password"
         placeholder="Nhập mật khẩu"
       >
+
+      <label class="remember-row" for="rememberLogin">
+        <input
+          id="rememberLogin"
+          type="checkbox"
+          checked
+        >
+        <span>Lưu đăng nhập trên thiết bị này</span>
+      </label>
 
       <button id="loginBtn" type="button" onclick="doLogin()">Đăng nhập</button>
       <div id="loginMsg" class="msg"></div>
@@ -207,14 +216,14 @@
 
           <p class="hint">
             Vật tư cố định được tự động tích sẵn. Danh sách bên dưới chỉ hiển thị vật tư đã chọn.
-            Tìm vật tư để chọn thêm.
+            Bảng chọn thêm sẽ tự hiện vật tư liên quan theo hiện tượng/cụm linh kiện. Có thể gõ để lọc nhanh.
           </p>
 
-          <label for="searchVatTu">Tìm vật tư để chọn thêm</label>
+          <label for="searchVatTu">Danh sách vật tư có thể chọn thêm</label>
           <input
             type="text"
             id="searchVatTu"
-            placeholder="Nhập tên vật tư hoặc cụm linh kiện..."
+            placeholder="Có thể gõ để lọc nhanh, không bắt buộc"
             oninput="renderVatTuSearch()"
             autocomplete="off"
           >
@@ -344,6 +353,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>
