@@ -2,71 +2,111 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#07883f">
+  <meta name="description" content="eGreen - Hệ thống tạo phiếu chuẩn bị vật tư">
   <title>eGreen - Phiếu vật tư</title>
-  <link rel="stylesheet" href="style.css">
+
+  <link rel="stylesheet" href="style.css?v=14">
 </head>
 
 <body>
+  <!-- LOGIN -->
   <div id="loginPage" class="login-page">
     <div class="login-card">
       <h2>eGreen</h2>
       <p>Đăng nhập hệ thống phiếu vật tư</p>
 
-      <label>Tên đăng nhập</label>
-      <input id="loginUsername" autocomplete="username">
+      <label for="loginUsername">Tên đăng nhập</label>
+      <input
+        id="loginUsername"
+        type="text"
+        autocomplete="username"
+        inputmode="text"
+        placeholder="Nhập tên đăng nhập"
+      >
 
-      <label>Mật khẩu</label>
-      <input id="loginPassword" type="password" autocomplete="current-password">
+      <label for="loginPassword">Mật khẩu</label>
+      <input
+        id="loginPassword"
+        type="password"
+        autocomplete="current-password"
+        placeholder="Nhập mật khẩu"
+      >
 
-      <button onclick="doLogin()">Đăng nhập</button>
+      <button id="loginBtn" type="button" onclick="doLogin()">Đăng nhập</button>
       <div id="loginMsg" class="msg"></div>
     </div>
   </div>
 
+  <!-- APP -->
   <div id="appPage" class="app-page hidden">
     <aside class="sidebar">
       <div class="logo">eGreen</div>
+
       <div id="userBox" class="user-box"></div>
 
-      <button class="nav active" onclick="showTab('formTab', this)">Tạo phiếu vật tư</button>
-      <button class="nav" onclick="showTab('historyTab', this)">Phiếu đã tạo</button>
-      <button id="adminNav" class="nav hidden" onclick="showTab('adminTab', this)">Quản lý tài khoản</button>
-      <button class="nav logout" onclick="doLogout()">Đăng xuất</button>
+      <button type="button" class="nav active" onclick="showTab('formTab', this)">
+        Tạo phiếu vật tư
+      </button>
+
+      <button type="button" class="nav" onclick="showTab('historyTab', this)">
+        Phiếu đã tạo
+      </button>
+
+      <button id="adminNav" type="button" class="nav hidden" onclick="showTab('adminTab', this)">
+        Quản lý tài khoản
+      </button>
+
+      <button type="button" class="nav logout" onclick="doLogout()">
+        Đăng xuất
+      </button>
     </aside>
 
     <main class="main">
+      <!-- FORM TAB -->
       <section id="formTab" class="tab">
         <h2 id="formTitle">Phiếu chuẩn bị vật tư</h2>
 
+        <!-- 1. TEAM -->
         <div class="card">
           <h3>1. Đội nhóm nhận nhiệm vụ</h3>
 
           <div class="grid-2">
             <div>
-              <label>Đội trưởng *</label>
-              <select id="doiTruong" onchange="onDoiTruongChange()"></select>
+              <label for="doiTruong">Đội trưởng *</label>
+              <select id="doiTruong" onchange="onDoiTruongChange()">
+                <option value="">-- Chọn đội trưởng --</option>
+              </select>
             </div>
 
             <div>
               <label>Thành viên *</label>
+
               <div class="multi-select" id="thanhVienMulti">
                 <button type="button" class="multi-select-btn" onclick="toggleMemberDropdown()">
                   <span id="thanhVienText">Chọn thành viên</span>
-                  <span>▾</span>
+                  <span class="dropdown-arrow">▾</span>
                 </button>
+
                 <div id="thanhVienDropdown" class="multi-select-dropdown hidden"></div>
               </div>
-              <p class="hint">Có thể chọn nhiều người. Danh sách tự bỏ người đã chọn ở ô Đội trưởng.</p>
+
+              <p class="hint">
+                Có thể chọn nhiều người. Danh sách tự bỏ người đã chọn ở ô Đội trưởng.
+              </p>
             </div>
           </div>
         </div>
 
+        <!-- 2. MACHINE -->
         <div class="card">
           <h3>2. Mã hệ thống đảm nhiệm</h3>
 
-          <label>Mã máy *</label>
-          <select id="maMay" onchange="onMayChange()"></select>
+          <label for="maMay">Mã máy *</label>
+          <select id="maMay" onchange="onMayChange()">
+            <option value="">-- Chọn mã máy --</option>
+          </select>
 
           <div class="info-grid">
             <div><b>Tên trại:</b> <span id="tenTrai"></span></div>
@@ -76,84 +116,151 @@
           </div>
         </div>
 
+        <!-- 3. TIME -->
         <div class="card">
           <h3>3. Thời gian thực hiện</h3>
 
           <div class="grid-2">
             <div>
-              <label>Ngày giờ xuất kho *</label>
+              <label for="ngayGioXuatKho">Ngày giờ xuất kho *</label>
               <input type="datetime-local" id="ngayGioXuatKho">
             </div>
 
             <div>
-              <label>Thành viên xuất kho *</label>
-              <select id="nguoiXuatKho"></select>
+              <label for="nguoiXuatKho">Thành viên xuất kho *</label>
+              <select id="nguoiXuatKho">
+                <option value="">-- Chọn người xuất kho --</option>
+              </select>
             </div>
 
             <div>
-              <label>Ngày giờ nhập kho</label>
+              <label for="ngayGioNhapKho">Ngày giờ nhập kho</label>
               <input type="datetime-local" id="ngayGioNhapKho">
             </div>
 
             <div>
-              <label>Người nhập kho</label>
-              <select id="nguoiNhapKho"></select>
+              <label for="nguoiNhapKho">Người nhập kho</label>
+              <select id="nguoiNhapKho">
+                <option value="">-- Chọn người nhập kho --</option>
+              </select>
             </div>
           </div>
         </div>
 
+        <!-- 4. PURPOSE -->
         <div class="card">
           <h3>4. Mục đích sử dụng vật tư</h3>
 
           <div class="radio-row">
-            <label><input type="radio" name="mucDich" value="Bảo dưỡng sửa chữa" checked onchange="onMucDichChange()"> Bảo dưỡng sửa chữa</label>
-            <label><input type="radio" name="mucDich" value="Lắp đặt" onchange="onMucDichChange()"> Lắp đặt</label>
-            <label><input type="radio" name="mucDich" value="Sản xuất" onchange="onMucDichChange()"> Sản xuất</label>
+            <label>
+              <input
+                type="radio"
+                name="mucDich"
+                value="Bảo dưỡng sửa chữa"
+                checked
+                onchange="onMucDichChange()"
+              >
+              Bảo dưỡng sửa chữa
+            </label>
+
+            <label>
+              <input
+                type="radio"
+                name="mucDich"
+                value="Lắp đặt"
+                onchange="onMucDichChange()"
+              >
+              Lắp đặt
+            </label>
+
+            <label>
+              <input
+                type="radio"
+                name="mucDich"
+                value="Sản xuất"
+                onchange="onMucDichChange()"
+              >
+              Sản xuất
+            </label>
           </div>
 
           <div id="boxHienTuong">
-            <label>Cụ thể - Chọn hiện tượng *</label>
-            <select id="hienTuong" onchange="renderVatTuSearch()"></select>
+            <label for="hienTuong">Cụ thể - Chọn hiện tượng *</label>
+            <select id="hienTuong" onchange="renderVatTuSearch()">
+              <option value="">-- Chọn hiện tượng --</option>
+            </select>
           </div>
 
           <div id="boxCuThe" class="hidden">
-            <label>Cụ thể *</label>
-            <textarea id="cuTheNhapTay" rows="3" placeholder="Nhập nội dung cụ thể..."></textarea>
+            <label for="cuTheNhapTay">Cụ thể *</label>
+            <textarea
+              id="cuTheNhapTay"
+              rows="3"
+              placeholder="Nhập nội dung cụ thể..."
+            ></textarea>
           </div>
         </div>
 
+        <!-- 5. MATERIALS -->
         <div class="card">
           <h3>5. Danh sách vật tư</h3>
+
           <p class="hint">
             Vật tư cố định được tự động tích sẵn. Danh sách bên dưới chỉ hiển thị vật tư đã chọn.
             Tìm vật tư để chọn thêm.
           </p>
 
-          <input type="text" id="searchVatTu" placeholder="Tìm vật tư để chọn thêm..." oninput="renderVatTuSearch()">
+          <label for="searchVatTu">Tìm vật tư để chọn thêm</label>
+          <input
+            type="text"
+            id="searchVatTu"
+            placeholder="Nhập tên vật tư hoặc cụm linh kiện..."
+            oninput="renderVatTuSearch()"
+            autocomplete="off"
+          >
+
           <div id="vatTuSearchList" class="suggest-box hidden"></div>
 
           <h4>Vật tư đã chọn</h4>
-          <div id="selectedItems"></div>
+          <div id="selectedItems">
+            <i>Chưa chọn vật tư.</i>
+          </div>
         </div>
 
+        <!-- ACTIONS -->
         <div class="action-row">
-          <button class="preview-btn" onclick="previewCurrentForm()">Xem trước phiếu</button>
-          <button id="saveBtn" class="save-btn" onclick="save()">Lưu phiếu</button>
-          <button id="cancelEditBtn" class="small-btn secondary hidden" onclick="cancelEdit()">Hủy sửa</button>
+          <button type="button" class="preview-btn" onclick="previewCurrentForm()">
+            Xem trước phiếu
+          </button>
+
+          <button id="saveBtn" type="button" class="save-btn" onclick="save()">
+            Lưu phiếu
+          </button>
+
+          <button id="cancelEditBtn" type="button" class="small-btn secondary hidden" onclick="cancelEdit()">
+            Hủy sửa
+          </button>
         </div>
       </section>
 
+      <!-- HISTORY TAB -->
       <section id="historyTab" class="tab hidden">
         <h2>Phiếu đã tạo</h2>
 
         <div class="card">
           <div class="history-toolbar">
-            <button class="small-btn" onclick="loadPhieuList(false)">Cập nhật danh sách</button>
+            <button type="button" class="small-btn" onclick="loadPhieuList(false)">
+              Cập nhật danh sách
+            </button>
           </div>
-          <div id="phieuList"></div>
+
+          <div id="phieuList">
+            <i>Chưa tải danh sách phiếu.</i>
+          </div>
         </div>
       </section>
 
+      <!-- ADMIN TAB -->
       <section id="adminTab" class="tab hidden">
         <h2>Quản lý tài khoản</h2>
 
@@ -164,22 +271,27 @@
 
           <div class="grid-2">
             <div>
-              <label>Tên đăng nhập *</label>
-              <input id="accUsername">
+              <label for="accUsername">Tên đăng nhập *</label>
+              <input id="accUsername" autocomplete="off">
             </div>
 
             <div>
-              <label>Mật khẩu</label>
-              <input id="accPassword" placeholder="Bỏ trống nếu không đổi mật khẩu">
+              <label for="accPassword">Mật khẩu</label>
+              <input
+                id="accPassword"
+                type="password"
+                placeholder="Bỏ trống nếu không đổi mật khẩu"
+                autocomplete="new-password"
+              >
             </div>
 
             <div>
-              <label>Họ và tên *</label>
-              <input id="accFullName">
+              <label for="accFullName">Họ và tên *</label>
+              <input id="accFullName" autocomplete="off">
             </div>
 
             <div>
-              <label>Vai trò *</label>
+              <label for="accRole">Vai trò *</label>
               <select id="accRole">
                 <option value="ktv">ktv</option>
                 <option value="admin">admin</option>
@@ -187,7 +299,7 @@
             </div>
 
             <div>
-              <label>Trạng thái *</label>
+              <label for="accStatus">Trạng thái *</label>
               <select id="accStatus">
                 <option value="active">active</option>
                 <option value="pending">pending</option>
@@ -196,33 +308,42 @@
             </div>
 
             <div>
-              <label>Ghi chú</label>
-              <input id="accNote">
+              <label for="accNote">Ghi chú</label>
+              <input id="accNote" autocomplete="off">
             </div>
           </div>
 
-          <button class="small-btn" onclick="saveAccountUI()">Lưu tài khoản</button>
-          <button class="small-btn secondary" onclick="clearAccountForm()">Làm mới</button>
+          <button type="button" class="small-btn" onclick="saveAccountUI()">
+            Lưu tài khoản
+          </button>
+
+          <button type="button" class="small-btn secondary" onclick="clearAccountForm()">
+            Làm mới
+          </button>
         </div>
 
         <div class="card">
           <h3>Danh sách tài khoản</h3>
-          <div id="accountList"></div>
+          <div id="accountList">
+            <i>Chưa tải danh sách tài khoản.</i>
+          </div>
         </div>
       </section>
     </main>
   </div>
 
+  <!-- PREVIEW MODAL -->
   <div id="previewModal" class="modal hidden">
     <div class="modal-content">
       <div class="modal-header">
         <h3>Xem trước phiếu</h3>
-        <button onclick="closePreview()">Đóng</button>
+        <button type="button" onclick="closePreview()">Đóng</button>
       </div>
-      <iframe id="previewFrame"></iframe>
+
+      <iframe id="previewFrame" title="Xem trước phiếu"></iframe>
     </div>
   </div>
 
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>
