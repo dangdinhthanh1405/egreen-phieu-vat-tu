@@ -764,77 +764,68 @@ function getFixedMaterials() {
 function getSelectableMaterials() {
   const mucDich = getRadioValue('mucDich');
 
-  // Nếu không phải bảo dưỡng sửa chữa thì mới cho hiện toàn bộ vật tư
+  // Nếu là lắp đặt / sản xuất thì cho hiện toàn bộ vật tư
   if (mucDich !== 'Bảo dưỡng sửa chữa') {
     return APP.vatTu.filter(x => getTenVatTu(x));
   }
 
   const hienTuong = getValue('hienTuong');
 
-  // Nếu chưa chọn hiện tượng thì không hiện danh sách chọn thêm
+  // Nếu chưa chọn hiện tượng thì chưa hiện vật tư chọn thêm
   if (!hienTuong) {
     return [];
   }
 
   const relatedCums = getRelatedCumsByHienTuong(hienTuong);
 
-  // Nếu hiện tượng đã chọn nhưng không tìm được cụm linh kiện liên quan
-  // thì không được hiện toàn bộ vật tư nữa
+  // Nếu hiện tượng chưa được gán cụm linh kiện ở sheet 3 thì không bung toàn bộ vật tư
   if (!relatedCums.length) {
     return [];
   }
 
   const relatedNorms = relatedCums.map(normText);
 
-  return APP.vatTu.filter(x => {
-    const tenVatTu = getTenVatTu(x);
+  return APP.vatTu.filter(item => {
+    const tenVatTu = getTenVatTu(item);
     if (!tenVatTu) return false;
 
-    const cumVatTu = normText(getCumLinhKien(x));
-    return relatedNorms.includes(cumVatTu);
+    const cumVatTu = getCumLinhKien(item);
+    if (!cumVatTu) return false;
+
+    return relatedNorms.includes(normText(cumVatTu));
   });
 }
 
 function getRelatedCumsByHienTuong(hienTuong) {
   const htNorm = normText(hienTuong);
 
-  const rows = APP.hienTuong.filter(x => {
-    const name = getObjValue(x, [
-      'Hiện tượng/Sự cố',
-      'Hiện tượng',
-      'Hien tuong',
-      'Sự cố',
-      'Lỗi',
-      'Cụ thể'
-    ]);
-
-    return normText(name) === htNorm;
-  });
-
   const cums = [];
 
-  rows.forEach(row => {
-    [
-      'Cụm vật tư',
-      'Cụm Vật Tư',
-      'Cụm linh kiện',
-      'Cụm Linh Kiện',
-      'Cum linh kien',
-      'Cụm',
-      'Hệ thống',
-      'Hệ Thống',
-      'Nhóm vật tư',
-      'Nhóm linh kiện'
-    ].forEach(key => {
-      const val = row[key];
-      if (!val) return;
+  APP.hienTuong.forEach(row => {
+    const tenHienTuong = getObjValue(row, [
+      'Hiện Tượng/Sự cố',
+      'Hiện tượng/Sự cố',
+      'Hiện tượng/sự cố',
+      'Hien Tuong/Su co',
+      'Hien tuong/Su co'
+    ]);
 
-      String(val)
-        .split(/[;,|\/]/)
-        .map(x => x.trim())
-        .filter(Boolean)
-        .forEach(x => cums.push(x));
-    });
+    if (normText(tenHienTuong) !== htNorm) return;
+
+    const cumLienQuan = getObjValue(row, [
+      'Cụm Linh Kiện Liên Quan',
+      'Cụm linh kiện liên quan',
+      'Cum Linh Kien Lien Quan',
+      'Cum linh kien lien quan'
+    ]);
+
+    if (!cumLienQuan) return;
+
+    String(cumLienQuan)
+      .split(/[;,|\/]/)
+      .map(x => x.trim())
+      .filter(Boolean)
+      .forEach(x => cums.push(x));
   });
 
   return uniqueArray(cums);
@@ -1036,12 +1027,10 @@ function getTenVatTu(item) {
   return String(getObjValue(item, [
     'Tên Chi Tiết / Linh Kiện Thay Thế',
     'Tên chi tiết / linh kiện thay thế',
-    'Tên chi tiết',
+    'Ten Chi Tiet / Linh Kien Thay The',
+    'Ten chi tiet / linh kien thay the',
     'Tên vật tư',
-    'Ten vat tu',
-    'Vật tư',
-    'Linh kiện',
-    'Hạng mục vật tư'
+    'Ten vat tu'
   ]) || '').trim();
 }
 
@@ -1049,10 +1038,8 @@ function getCumLinhKien(item) {
   return String(getObjValue(item, [
     'Cụm Linh Kiện',
     'Cụm linh kiện',
-    'Cụm vật tư',
-    'Cum linh kien',
-    'Nhóm',
-    'Hệ thống'
+    'Cum Linh Kien',
+    'Cum linh kien'
   ]) || '').trim();
 }
 
