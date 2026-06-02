@@ -764,30 +764,34 @@ function getFixedMaterials() {
 function getSelectableMaterials() {
   const mucDich = getRadioValue('mucDich');
 
+  // Nếu không phải bảo dưỡng sửa chữa thì mới cho hiện toàn bộ vật tư
   if (mucDich !== 'Bảo dưỡng sửa chữa') {
     return APP.vatTu.filter(x => getTenVatTu(x));
   }
 
   const hienTuong = getValue('hienTuong');
 
+  // Nếu chưa chọn hiện tượng thì không hiện danh sách chọn thêm
   if (!hienTuong) {
-    return APP.vatTu.filter(x => getTenVatTu(x));
+    return [];
   }
 
   const relatedCums = getRelatedCumsByHienTuong(hienTuong);
 
+  // Nếu hiện tượng đã chọn nhưng không tìm được cụm linh kiện liên quan
+  // thì không được hiện toàn bộ vật tư nữa
   if (!relatedCums.length) {
-    return APP.vatTu.filter(x => getTenVatTu(x));
+    return [];
   }
 
   const relatedNorms = relatedCums.map(normText);
 
   return APP.vatTu.filter(x => {
-    const ten = getTenVatTu(x);
-    if (!ten) return false;
+    const tenVatTu = getTenVatTu(x);
+    if (!tenVatTu) return false;
 
-    const cum = normText(getCumLinhKien(x));
-    return relatedNorms.includes(cum);
+    const cumVatTu = normText(getCumLinhKien(x));
+    return relatedNorms.includes(cumVatTu);
   });
 }
 
@@ -795,7 +799,15 @@ function getRelatedCumsByHienTuong(hienTuong) {
   const htNorm = normText(hienTuong);
 
   const rows = APP.hienTuong.filter(x => {
-    const name = getObjValue(x, ['Hiện tượng/Sự cố', 'Hiện tượng', 'Hien tuong', 'Sự cố', 'Lỗi']);
+    const name = getObjValue(x, [
+      'Hiện tượng/Sự cố',
+      'Hiện tượng',
+      'Hien tuong',
+      'Sự cố',
+      'Lỗi',
+      'Cụ thể'
+    ]);
+
     return normText(name) === htNorm;
   });
 
@@ -808,14 +820,17 @@ function getRelatedCumsByHienTuong(hienTuong) {
       'Cụm linh kiện',
       'Cụm Linh Kiện',
       'Cum linh kien',
+      'Cụm',
       'Hệ thống',
-      'Hệ Thống'
+      'Hệ Thống',
+      'Nhóm vật tư',
+      'Nhóm linh kiện'
     ].forEach(key => {
       const val = row[key];
       if (!val) return;
 
       String(val)
-        .split(/[;,|]/)
+        .split(/[;,|\/]/)
         .map(x => x.trim())
         .filter(Boolean)
         .forEach(x => cums.push(x));
@@ -851,10 +866,21 @@ function renderVatTuSearch() {
   });
 
   if (!list.length) {
-    box.classList.remove('hidden');
+  box.classList.remove('hidden');
+
+  const mucDich = getRadioValue('mucDich');
+  const hienTuong = getValue('hienTuong');
+
+  if (mucDich === 'Bảo dưỡng sửa chữa' && !hienTuong) {
+    box.innerHTML = '<div class="suggest-row suggest-empty">Vui lòng chọn hiện tượng trước để lọc vật tư liên quan.</div>';
+  } else if (mucDich === 'Bảo dưỡng sửa chữa') {
+    box.innerHTML = '<div class="suggest-row suggest-empty">Hiện tượng này chưa được gán cụm linh kiện/vật tư liên quan trong dữ liệu.</div>';
+  } else {
     box.innerHTML = '<div class="suggest-row suggest-empty">Không có vật tư phù hợp để chọn thêm.</div>';
-    return;
   }
+
+  return;
+}
 
   const groups = groupBy(list, item => getCumLinhKien(item) || 'Khác');
 
