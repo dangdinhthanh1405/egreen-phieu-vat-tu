@@ -1176,3 +1176,125 @@ textarea:disabled {
   border-color: #07883f;
   box-shadow: 0 0 0 3px rgba(7, 136, 63, 0.1);
 }
+/* ================================
+   ĐỒNG BỘ GIAO DIỆN DROPDOWN THÀNH VIÊN
+   Giống popup Đội trưởng / Mã máy
+================================ */
+
+.multi-select {
+  position: relative;
+  width: 100%;
+}
+
+.multi-select-btn {
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 44px 8px 16px;
+  border: 1px solid #d5dde5;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.multi-select-btn:focus,
+.multi-select-btn:hover {
+  border-color: #07883f;
+  box-shadow: 0 0 0 3px rgba(7, 136, 63, 0.12);
+}
+
+.multi-select-btn .dropdown-arrow {
+  position: absolute;
+  right: 16px;
+  color: #334155;
+  font-size: 14px;
+}
+
+.multi-select-dropdown {
+  position: absolute;
+  z-index: 9999;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 310px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #d5dde5;
+  border-radius: 14px;
+  box-shadow: 0 16px 35px rgba(15, 23, 42, 0.18);
+  padding: 8px;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.member-option {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #ffffff;
+  border-bottom: 1px solid #edf2f7;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.member-option:last-child {
+  border-bottom: 0;
+}
+
+.member-option:hover {
+  background: #e9f7ef;
+}
+
+.member-option.selected {
+  background: #e3f6ec;
+}
+
+.member-option.selected .search-option-title {
+  color: #04733b;
+}
+
+#thanhVienText {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-height: 26px;
+  color: #334155;
+}
+
+.selected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #e3f6ec;
+  color: #04733b;
+  border: 1px solid #bce7cf;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.selected-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #04733b;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.selected-chip-x:hover {
+  color: #b91c1c;
+}
