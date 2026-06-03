@@ -1229,7 +1229,6 @@ function collectFormPayload() {
 
 function validatePayloadClient(payload) {
   if (!payload.doiTruong) return 'Vui lòng chọn đội trưởng.';
-  if (!payload.thanhVien || !payload.thanhVien.length) return 'Vui lòng chọn thành viên.';
   if (!payload.maMay) return 'Vui lòng chọn mã máy.';
   if (!payload.ngayGioXuatKho) return 'Vui lòng nhập ngày giờ xuất kho.';
   if (!payload.nguoiXuatKho) return 'Vui lòng chọn người xuất kho.';
