@@ -235,11 +235,21 @@
           </div>
 
           <div id="boxHienTuong">
-            <label for="hienTuong">Cụ thể - Chọn hiện tượng *</label>
-            <select id="hienTuong" onchange="renderVatTuSearch()">
-              <option value="">-- Chọn hiện tượng --</option>
-            </select>
-          </div>
+  <label>Hiện tượng / sự cố</label>
+
+  <div class="multi-select" id="hienTuongMulti">
+    <button type="button" class="multi-select-btn" onclick="toggleHienTuongDropdown()">
+      <span id="hienTuongText">Không chọn hiện tượng</span>
+      <span class="dropdown-arrow">▾</span>
+    </button>
+
+    <div id="hienTuongDropdown" class="multi-select-dropdown hidden"></div>
+  </div>
+
+  <p class="hint">
+    Có thể chọn một hoặc nhiều hiện tượng. Nếu không chọn, danh sách vật tư sẽ hiện toàn bộ vật tư.
+  </p>
+</div>
 
           <div id="boxCuThe" class="hidden">
             <label for="cuTheNhapTay">Cụ thể *</label>
@@ -394,6 +404,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=23"></script>
+  <script src="app.js?v=24"></script>
 </body>
 </html>
