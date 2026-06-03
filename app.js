@@ -533,9 +533,10 @@ function renderNamePopup(id, names) {
 
   popup.innerHTML = names.map(name => {
     return `
-      <button type="button" class="search-popup-item" onclick="selectNamePopup('${escapeJs(id)}', '${escapeJs(name)}')">
-        ${escapeHtml(name)}
-      </button>`;
+      <div class="search-option" onclick="selectNamePopup('${escapeJs(id)}', '${escapeJs(name)}')">
+        <div class="search-option-title">${escapeHtml(name)}</div>
+      </div>
+    `;
   }).join('');
 }
 
@@ -670,16 +671,19 @@ function renderMachinePopup(list) {
     const tinhTP = getTinhTP(may);
     const khuVuc = getKhuVuc(may);
 
+    const subInfo = [
+      tenTrai,
+      donVi,
+      tinhTP,
+      khuVuc
+    ].filter(Boolean).join(' · ');
+
     return `
-      <button type="button" class="search-popup-item machine-item" onclick="selectMachinePopup('${escapeJs(maMay)}')">
-        <b>${escapeHtml(maMay)}</b>
-        <small>
-          ${escapeHtml(tenTrai || '')}
-          ${donVi ? ' - ' + escapeHtml(donVi) : ''}
-          ${tinhTP ? ' - ' + escapeHtml(tinhTP) : ''}
-          ${khuVuc ? ' - ' + escapeHtml(khuVuc) : ''}
-        </small>
-      </button>`;
+      <div class="search-option machine-option" onclick="selectMachinePopup('${escapeJs(maMay)}')">
+        <div class="search-option-title">${escapeHtml(maMay)}</div>
+        <div class="search-option-sub">${escapeHtml(subInfo)}</div>
+      </div>
+    `;
   }).join('');
 }
 
