@@ -888,42 +888,61 @@ function renderMemberDropdown() {
   `;
 
   if (!names.length) {
-    dropdown.innerHTML = searchBox + '<div class="multi-option">Không tìm thấy thành viên phù hợp.</div>';
+    dropdown.innerHTML = searchBox + '<div class="search-popup-empty">Không tìm thấy thành viên phù hợp.</div>';
     renderMemberText();
     return;
   }
 
   dropdown.innerHTML = searchBox + names.map(name => {
-    const checked = SELECTED_MEMBERS.includes(name) ? 'checked' : '';
+    const selected = SELECTED_MEMBERS.includes(name) ? 'selected' : '';
 
     return `
-      <label class="multi-option">
-        <input
-          type="checkbox"
-          ${checked}
-          onchange="toggleMember('${escapeJs(name)}', this.checked)"
-        >
-        <span>${escapeHtml(name)}</span>
-      </label>
+      <div
+        class="search-option member-option ${selected}"
+        onclick="toggleMemberByName('${escapeJs(name)}')"
+      >
+        <div class="search-option-title">${escapeHtml(name)}</div>
+      </div>
     `;
   }).join('');
 
   renderMemberText();
 }
 
-function toggleMember(name, checked) {
-  if (checked) {
-    if (!SELECTED_MEMBERS.includes(name)) SELECTED_MEMBERS.push(name);
-  } else {
+function toggleMemberByName(name) {
+  if (SELECTED_MEMBERS.includes(name)) {
     SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== name);
+  } else {
+    SELECTED_MEMBERS.push(name);
   }
+
+  renderMemberDropdown();
   renderMemberText();
 }
 
 function renderMemberText() {
   const text = document.getElementById('thanhVienText');
   if (!text) return;
-  text.textContent = SELECTED_MEMBERS.length ? SELECTED_MEMBERS.join('; ') : 'Chọn thành viên';
+
+  if (!SELECTED_MEMBERS.length) {
+    text.innerHTML = 'Chọn thành viên';
+    return;
+  }
+
+  text.innerHTML = SELECTED_MEMBERS.map(name => {
+    return `
+      <span class="selected-chip">
+        ${escapeHtml(name)}
+        <span class="selected-chip-x" onclick="event.stopPropagation(); removeMemberChip('${escapeJs(name)}')">×</span>
+      </span>
+    `;
+  }).join('');
+}
+
+function removeMemberChip(name) {
+  SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== name);
+  renderMemberDropdown();
+  renderMemberText();
 }
 
 /****************************************************
