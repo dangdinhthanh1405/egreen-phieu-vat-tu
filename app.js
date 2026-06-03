@@ -14,11 +14,14 @@ const JSONP_CHUNK_SIZE = 1200;
 let TOKEN = '';
 let CURRENT_USER = null;
 let ACCOUNT_CACHE = [];
-let SELECTED_MEMBERS = [];
+
 let KTV_NAME_CACHE = [];
 let MACHINE_CACHE = [];
-let SELECTED_HIEN_TUONG = [];
 let HIENTUONG_CACHE = [];
+
+let SELECTED_MEMBERS = [];
+let SELECTED_HIEN_TUONG = [];
+
 let AUTO_REFRESH_TIMER = null;
 let EDITING_MA_PHIEU = '';
 let IS_BUSY = false;
@@ -45,25 +48,15 @@ window.onload = function () {
 
 function bindGlobalEvents() {
   document.addEventListener('click', function (e) {
-    const multi = document.getElementById('thanhVienMulti');
-    const dropdown = document.getElementById('thanhVienDropdown');
-
-    if (multi && dropdown && !multi.contains(e.target)) {
-      dropdown.classList.add('hidden');
-    }
-    const hienTuongMulti = document.getElementById('hienTuongMulti');
-const hienTuongDropdown = document.getElementById('hienTuongDropdown');
-
-if (hienTuongMulti && hienTuongDropdown && !hienTuongMulti.contains(e.target)) {
-  hienTuongDropdown.classList.add('hidden');
-}
-
+    closeMultiDropdownOnOutsideClick(e, 'thanhVienMulti', 'thanhVienDropdown');
+    closeMultiDropdownOnOutsideClick(e, 'hienTuongMulti', 'hienTuongDropdown');
     closeSearchPopupsOnOutsideClick(e);
   });
 
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
       closePreview();
+      closeAllDropdowns();
       closeAllSearchPopups();
       return;
     }
@@ -320,13 +313,17 @@ async function doLogout() {
   } catch (e) {}
 
   stopAutoRefresh();
+
   TOKEN = '';
   CURRENT_USER = null;
   ACCOUNT_CACHE = [];
-  SELECTED_MEMBERS = [];
   KTV_NAME_CACHE = [];
   MACHINE_CACHE = [];
+  HIENTUONG_CACHE = [];
+  SELECTED_MEMBERS = [];
+  SELECTED_HIEN_TUONG = [];
   EDITING_MA_PHIEU = '';
+
   clearSavedSession();
 
   const loginPage = document.getElementById('loginPage');
@@ -360,12 +357,15 @@ function initApp(data) {
 
   renderUserBox();
   setupRoleUI();
+
   fillKtvSelects();
   fillMachineSelect();
   fillHienTuongSelect();
+
   setDefaultDateTime();
   resetSelectedMaterials();
   renderSelectedItems();
+
   showFirstAvailableTab();
   loadPhieuList(true);
 
@@ -401,8 +401,10 @@ function showFirstAvailableTab() {
 
 function startAutoRefresh() {
   stopAutoRefresh();
+
   AUTO_REFRESH_TIMER = setInterval(async () => {
     if (!TOKEN || IS_BUSY || IS_BOOTING) return;
+
     try {
       await silentRefreshData();
     } catch (e) {
@@ -428,6 +430,7 @@ async function silentRefreshData() {
   APP.vatTuCoDinh = Array.isArray(data.vatTuCoDinh) ? data.vatTuCoDinh : [];
 
   CURRENT_USER = data.currentUser || CURRENT_USER;
+
   renderUserBox();
   setupRoleUI();
   saveSession();
@@ -435,11 +438,14 @@ async function silentRefreshData() {
   fillKtvSelects(true);
   fillMachineSelect(true);
   fillHienTuongSelect(true);
+
   renderVatTuSearch();
   renderSelectedItems();
 
   const historyTab = document.getElementById('historyTab');
-  if (historyTab && !historyTab.classList.contains('hidden')) await loadPhieuList(true);
+  if (historyTab && !historyTab.classList.contains('hidden')) {
+    await loadPhieuList(true);
+  }
 
   const adminTab = document.getElementById('adminTab');
   if (CURRENT_USER && CURRENT_USER.role === 'admin' && adminTab && !adminTab.classList.contains('hidden')) {
@@ -464,7 +470,7 @@ function showTab(tabId, btn) {
 }
 
 /****************************************************
- * SELECT DATA - KTV POPUP
+ * SEARCH POPUP - SINGLE SELECT
  ****************************************************/
 
 function fillKtvSelects(keepValue) {
@@ -715,7 +721,168 @@ function getAllObjectValuesText(obj) {
 }
 
 /****************************************************
- * HỆ THỐNG / HIỆN TƯỢNG / THÀNH VIÊN
+ * MULTI SELECT - THÀNH VIÊN / HIỆN TƯỢNG
+ ****************************************************/
+
+function closeMultiDropdownOnOutsideClick(e, boxId, dropdownId) {
+  const box = document.getElementById(boxId);
+  const dropdown = document.getElementById(dropdownId);
+
+  if (box && dropdown && !box.contains(e.target)) {
+    dropdown.classList.add('hidden');
+  }
+}
+
+function closeAllDropdowns() {
+  const ids = ['thanhVienDropdown', 'hienTuongDropdown'];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hidden');
+  });
+}
+
+function renderMultiChoiceDropdown(config) {
+  const dropdown = document.getElementById(config.dropdownId);
+  if (!dropdown) return;
+
+  const oldInput = document.getElementById(config.searchId);
+  const rawKeyword = oldInput ? oldInput.value : '';
+  const keyword = normText(rawKeyword);
+  const wasFocused = oldInput && document.activeElement === oldInput;
+  const cursorPos = oldInput ? oldInput.selectionStart : rawKeyword.length;
+
+  let list = config.items.slice();
+
+  if (keyword) {
+    list = list.filter(name => normText(name).includes(keyword));
+  }
+
+  const searchBox = `
+    <div class="multi-search-row">
+      <input
+        id="${escapeHtml(config.searchId)}"
+        type="text"
+        value="${escapeHtml(rawKeyword)}"
+        placeholder="${escapeHtml(config.placeholder)}"
+        autocomplete="off"
+        oninput="${config.renderFnName}()"
+        onclick="event.stopPropagation()"
+        onkeydown="event.stopPropagation()"
+      >
+    </div>
+  `;
+
+  if (!list.length) {
+    dropdown.innerHTML = searchBox + `<div class="search-popup-empty">${escapeHtml(config.emptyText)}</div>`;
+  } else {
+    dropdown.innerHTML = searchBox + list.map(name => {
+      const selected = config.selected.includes(name) ? 'selected' : '';
+
+      return `
+        <div
+          class="search-option member-option ${selected}"
+          onclick="${config.toggleFnName}('${escapeJs(name)}')"
+        >
+          <div class="search-option-title">${escapeHtml(name)}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  const newInput = document.getElementById(config.searchId);
+  if (wasFocused && newInput) {
+    newInput.focus();
+
+    try {
+      const pos = Math.min(cursorPos, newInput.value.length);
+      newInput.setSelectionRange(pos, pos);
+    } catch (e) {}
+  }
+}
+
+function renderChipText(containerId, selected, emptyText, removeFnName) {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+
+  if (!selected.length) {
+    box.innerHTML = escapeHtml(emptyText);
+    return;
+  }
+
+  box.innerHTML = selected.map(name => {
+    return `
+      <span class="selected-chip">
+        ${escapeHtml(name)}
+        <span
+          class="selected-chip-x"
+          onclick="event.stopPropagation(); ${removeFnName}('${escapeJs(name)}')"
+        >×</span>
+      </span>
+    `;
+  }).join('');
+}
+
+/****************************************************
+ * THÀNH VIÊN
+ ****************************************************/
+
+function onDoiTruongChange() {
+  const doiTruong = getValue('doiTruong');
+  SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== doiTruong);
+
+  renderMemberDropdown();
+  renderMemberText();
+}
+
+function toggleMemberDropdown() {
+  const dropdown = document.getElementById('thanhVienDropdown');
+  if (!dropdown) return;
+
+  dropdown.classList.toggle('hidden');
+  renderMemberDropdown();
+}
+
+function renderMemberDropdown() {
+  const doiTruong = getValue('doiTruong');
+  const names = getKtvNames().filter(x => x !== doiTruong);
+
+  renderMultiChoiceDropdown({
+    dropdownId: 'thanhVienDropdown',
+    searchId: 'memberSearch',
+    items: names,
+    selected: SELECTED_MEMBERS,
+    placeholder: 'Gõ để tìm thành viên...',
+    emptyText: 'Không tìm thấy thành viên phù hợp.',
+    renderFnName: 'renderMemberDropdown',
+    toggleFnName: 'toggleMemberByName'
+  });
+
+  renderMemberText();
+}
+
+function toggleMemberByName(name) {
+  if (SELECTED_MEMBERS.includes(name)) {
+    SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== name);
+  } else {
+    SELECTED_MEMBERS.push(name);
+  }
+
+  renderMemberDropdown();
+  renderMemberText();
+}
+
+function removeMemberChip(name) {
+  SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== name);
+  renderMemberDropdown();
+  renderMemberText();
+}
+
+function renderMemberText() {
+  renderChipText('thanhVienText', SELECTED_MEMBERS, 'Chọn thành viên', 'removeMemberChip');
+}
+
+/****************************************************
+ * HIỆN TƯỢNG
  ****************************************************/
 
 function fillHienTuongSelect(keepValue) {
@@ -755,61 +922,18 @@ function toggleHienTuongDropdown() {
 }
 
 function renderHienTuongDropdown() {
-  const dropdown = document.getElementById('hienTuongDropdown');
-  if (!dropdown) return;
-
-  const oldInput = document.getElementById('hienTuongSearch');
-  const rawKeyword = oldInput ? oldInput.value : '';
-  const keyword = normText(rawKeyword);
-  const wasFocused = oldInput && document.activeElement === oldInput;
-  const cursorPos = oldInput ? oldInput.selectionStart : rawKeyword.length;
-
-  const list = HIENTUONG_CACHE.filter(name => {
-    if (!keyword) return true;
-    return normText(name).includes(keyword);
+  renderMultiChoiceDropdown({
+    dropdownId: 'hienTuongDropdown',
+    searchId: 'hienTuongSearch',
+    items: HIENTUONG_CACHE,
+    selected: SELECTED_HIEN_TUONG,
+    placeholder: 'Gõ để tìm hiện tượng...',
+    emptyText: 'Không tìm thấy hiện tượng phù hợp.',
+    renderFnName: 'renderHienTuongDropdown',
+    toggleFnName: 'toggleHienTuongByName'
   });
 
-  const searchBox = `
-    <div class="multi-search-row">
-      <input
-        id="hienTuongSearch"
-        type="text"
-        value="${escapeHtml(rawKeyword)}"
-        placeholder="Gõ để tìm hiện tượng..."
-        autocomplete="off"
-        oninput="renderHienTuongDropdown()"
-        onclick="event.stopPropagation()"
-        onkeydown="event.stopPropagation()"
-      >
-    </div>
-  `;
-
-  if (!list.length) {
-    dropdown.innerHTML = searchBox + '<div class="search-popup-empty">Không tìm thấy hiện tượng phù hợp.</div>';
-  } else {
-    dropdown.innerHTML = searchBox + list.map(name => {
-      const selected = SELECTED_HIEN_TUONG.includes(name) ? 'selected' : '';
-
-      return `
-        <div
-          class="search-option member-option ${selected}"
-          onclick="toggleHienTuongByName('${escapeJs(name)}')"
-        >
-          <div class="search-option-title">${escapeHtml(name)}</div>
-        </div>
-      `;
-    }).join('');
-  }
-
-  const newInput = document.getElementById('hienTuongSearch');
-  if (wasFocused && newInput) {
-    newInput.focus();
-
-    try {
-      const pos = Math.min(cursorPos, newInput.value.length);
-      newInput.setSelectionRange(pos, pos);
-    } catch (e) {}
-  }
+  renderHienTuongText();
 }
 
 function toggleHienTuongByName(name) {
@@ -824,135 +948,15 @@ function toggleHienTuongByName(name) {
   renderVatTuSearch();
 }
 
+function removeHienTuongChip(name) {
+  SELECTED_HIEN_TUONG = SELECTED_HIEN_TUONG.filter(x => x !== name);
+  renderHienTuongDropdown();
+  renderHienTuongText();
+  renderVatTuSearch();
+}
+
 function renderHienTuongText() {
-  const text = document.getElementById('hienTuongText');
-  if (!text) return;
-
-  text.textContent = SELECTED_HIEN_TUONG.length
-    ? SELECTED_HIEN_TUONG.join('; ')
-    : 'Không chọn hiện tượng';
-}
-
-function fillSelect(id, values, placeholder, keepValue) {
-  const select = document.getElementById(id);
-  if (!select) return;
-
-  const oldValue = keepValue ? select.value : '';
-  select.innerHTML = '';
-
-  const emptyOpt = document.createElement('option');
-  emptyOpt.value = '';
-  emptyOpt.textContent = placeholder || '-- Chọn --';
-  select.appendChild(emptyOpt);
-
-  values.forEach(v => {
-    const opt = document.createElement('option');
-    opt.value = v;
-    opt.textContent = v;
-    select.appendChild(opt);
-  });
-
-  if (keepValue && oldValue) select.value = oldValue;
-}
-
-function onDoiTruongChange() {
-  const doiTruong = getValue('doiTruong');
-  SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== doiTruong);
-  renderMemberDropdown();
-  renderMemberText();
-}
-
-function toggleMemberDropdown() {
-  const dropdown = document.getElementById('thanhVienDropdown');
-  if (!dropdown) return;
-  dropdown.classList.toggle('hidden');
-  renderMemberDropdown();
-}
-
-function renderMemberDropdown() {
-  const dropdown = document.getElementById('thanhVienDropdown');
-  if (!dropdown) return;
-
-  const doiTruong = getValue('doiTruong');
-  const rawKeyword = getValue('memberSearch');
-  const keyword = normText(rawKeyword);
-
-  let names = getKtvNames().filter(x => x !== doiTruong);
-
-  if (keyword) {
-    names = names.filter(name => normText(name).includes(keyword));
-  }
-
-  const searchBox = `
-    <div class="multi-search-row">
-      <input
-        id="memberSearch"
-        type="text"
-        value="${escapeHtml(rawKeyword)}"
-        placeholder="Gõ để tìm thành viên..."
-        autocomplete="off"
-        oninput="renderMemberDropdown()"
-        onclick="event.stopPropagation()"
-      >
-    </div>
-  `;
-
-  if (!names.length) {
-    dropdown.innerHTML = searchBox + '<div class="search-popup-empty">Không tìm thấy thành viên phù hợp.</div>';
-    renderMemberText();
-    return;
-  }
-
-  dropdown.innerHTML = searchBox + names.map(name => {
-    const selected = SELECTED_MEMBERS.includes(name) ? 'selected' : '';
-
-    return `
-      <div
-        class="search-option member-option ${selected}"
-        onclick="toggleMemberByName('${escapeJs(name)}')"
-      >
-        <div class="search-option-title">${escapeHtml(name)}</div>
-      </div>
-    `;
-  }).join('');
-
-  renderMemberText();
-}
-
-function toggleMemberByName(name) {
-  if (SELECTED_MEMBERS.includes(name)) {
-    SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== name);
-  } else {
-    SELECTED_MEMBERS.push(name);
-  }
-
-  renderMemberDropdown();
-  renderMemberText();
-}
-
-function renderMemberText() {
-  const text = document.getElementById('thanhVienText');
-  if (!text) return;
-
-  if (!SELECTED_MEMBERS.length) {
-    text.innerHTML = 'Chọn thành viên';
-    return;
-  }
-
-  text.innerHTML = SELECTED_MEMBERS.map(name => {
-    return `
-      <span class="selected-chip">
-        ${escapeHtml(name)}
-        <span class="selected-chip-x" onclick="event.stopPropagation(); removeMemberChip('${escapeJs(name)}')">×</span>
-      </span>
-    `;
-  }).join('');
-}
-
-function removeMemberChip(name) {
-  SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== name);
-  renderMemberDropdown();
-  renderMemberText();
+  renderChipText('hienTuongText', SELECTED_HIEN_TUONG, 'Không chọn hiện tượng', 'removeHienTuongChip');
 }
 
 /****************************************************
@@ -984,12 +988,22 @@ function onMayChange() {
 }
 
 function getMayCode(obj) {
-  return String(getObjValue(obj, ['Mã Máy', 'Mã máy', 'Ma May', 'Ma may', 'Mã hệ thống', 'Mã máy phát', 'Code', 'Mã']) || '').trim();
+  return String(getObjValue(obj, [
+    'Mã Máy',
+    'Mã máy',
+    'Ma May',
+    'Ma may',
+    'Mã hệ thống',
+    'Mã máy phát',
+    'Code',
+    'Mã'
+  ]) || '').trim();
 }
 
 function findMayByCode(maMay) {
   const codeNorm = normText(maMay);
   if (!codeNorm) return null;
+
   return APP.may.find(row => normText(getMayCode(row)) === codeNorm) || null;
 }
 
@@ -998,19 +1012,53 @@ function getCurrentMachine() {
 }
 
 function getTenTrai(may) {
-  return String(getObjValue(may, ['Tên Trang Trại / Đơn Vị', 'Tên trang trại / đơn vị', 'Ten Trang Trai / Don Vi', 'Tên Trang Trại', 'Tên trang trại', 'Tên trại', 'Ten trai', 'Trang trại', 'Trang trai', 'Địa chỉ trại']) || '').trim();
+  return String(getObjValue(may, [
+    'Tên Trang Trại / Đơn Vị',
+    'Tên trang trại / đơn vị',
+    'Ten Trang Trai / Don Vi',
+    'Tên Trang Trại',
+    'Tên trang trại',
+    'Tên trại',
+    'Ten trai',
+    'Trang trại',
+    'Trang trai',
+    'Địa chỉ trại'
+  ]) || '').trim();
 }
 
 function getDonVi(may) {
-  return String(getObjValue(may, ['Đơn vị hợp tác', 'Đơn Vị Hợp Tác', 'Don vi hop tac', 'Đơn vị', 'Đơn Vị', 'Don vi']) || '').trim();
+  return String(getObjValue(may, [
+    'Đơn vị hợp tác',
+    'Đơn Vị Hợp Tác',
+    'Don vi hop tac',
+    'Đơn vị',
+    'Đơn Vị',
+    'Don vi'
+  ]) || '').trim();
 }
 
 function getKhuVuc(may) {
-  return String(getObjValue(may, ['Khu Vực', 'Khu vực', 'Khu Vuc', 'Khu vuc']) || '').trim();
+  return String(getObjValue(may, [
+    'Khu Vực',
+    'Khu vực',
+    'Khu Vuc',
+    'Khu vuc'
+  ]) || '').trim();
 }
 
 function getTinhTP(may) {
-  return String(getObjValue(may, ['Tỉnh Thành', 'Tỉnh thành', 'Tinh Thanh', 'Tỉnh/TP', 'Tinh/TP', 'Tỉnh / TP', 'Tỉnh', 'Tinh', 'Thành phố', 'Thanh pho']) || '').trim();
+  return String(getObjValue(may, [
+    'Tỉnh Thành',
+    'Tỉnh thành',
+    'Tinh Thanh',
+    'Tỉnh/TP',
+    'Tinh/TP',
+    'Tỉnh / TP',
+    'Tỉnh',
+    'Tinh',
+    'Thành phố',
+    'Thanh pho'
+  ]) || '').trim();
 }
 
 /****************************************************
@@ -1070,17 +1118,14 @@ function getFixedMaterials() {
 function getSelectableMaterials() {
   const mucDich = getRadioValue('mucDich');
 
-  // Lắp đặt / Sản xuất: hiện toàn bộ vật tư
   if (mucDich !== 'Bảo dưỡng sửa chữa') {
     return APP.vatTu.filter(x => getTenVatTu(x));
   }
 
-  // Bảo dưỡng sửa chữa nhưng chưa chọn hiện tượng: hiện toàn bộ vật tư
   if (!SELECTED_HIEN_TUONG.length) {
     return APP.vatTu.filter(x => getTenVatTu(x));
   }
 
-  // Có chọn hiện tượng: chỉ hiện vật tư thuộc các cụm liên quan
   const relatedCums = [];
 
   SELECTED_HIEN_TUONG.forEach(ht => {
@@ -1105,10 +1150,27 @@ function getRelatedCumsByHienTuong(hienTuong) {
   const cums = [];
 
   APP.hienTuong.forEach(row => {
-    const tenHienTuong = getObjValue(row, ['Hiện Tượng/Sự cố', 'Hiện tượng/Sự cố', 'Hiện tượng/sự cố', 'Hien Tuong/Su co', 'Hien tuong/Su co', 'Hiện tượng', 'Sự cố']);
+    const tenHienTuong = getObjValue(row, [
+      'Hiện Tượng/Sự cố',
+      'Hiện tượng/Sự cố',
+      'Hiện tượng/sự cố',
+      'Hien Tuong/Su co',
+      'Hien tuong/Su co',
+      'Hiện tượng',
+      'Sự cố'
+    ]);
+
     if (normText(tenHienTuong) !== htNorm) return;
 
-    const cumLienQuan = getObjValue(row, ['Cụm Linh Kiện Liên Quan', 'Cụm linh kiện liên quan', 'Cum Linh Kien Lien Quan', 'Cum linh kien lien quan', 'Cụm Linh Kiện', 'Cụm linh kiện']);
+    const cumLienQuan = getObjValue(row, [
+      'Cụm Linh Kiện Liên Quan',
+      'Cụm linh kiện liên quan',
+      'Cum Linh Kien Lien Quan',
+      'Cum linh kien lien quan',
+      'Cụm Linh Kiện',
+      'Cụm linh kiện'
+    ]);
+
     if (!cumLienQuan) return;
 
     String(cumLienQuan)
@@ -1127,7 +1189,8 @@ function renderVatTuSearch() {
 
   const keyword = normText(getValue('searchVatTu'));
   const selectedIds = new Set(APP.selected.map(x => x.id));
-  let list = getSelectableMaterials().filter(item => {
+
+  const list = getSelectableMaterials().filter(item => {
     const id = makeMaterialId(item);
     if (selectedIds.has(id)) return false;
     if (!keyword) return true;
@@ -1143,19 +1206,21 @@ function renderVatTuSearch() {
   });
 
   if (!list.length) {
-  box.classList.remove('hidden');
-  const mucDich = getRadioValue('mucDich');
+    box.classList.remove('hidden');
 
-  if (mucDich === 'Bảo dưỡng sửa chữa' && SELECTED_HIEN_TUONG.length) {
-    box.innerHTML = '<div class="suggest-row suggest-empty">Các hiện tượng đã chọn chưa được gán cụm linh kiện/vật tư liên quan trong dữ liệu.</div>';
-  } else {
-    box.innerHTML = '<div class="suggest-row suggest-empty">Không có vật tư phù hợp để chọn thêm.</div>';
+    const mucDich = getRadioValue('mucDich');
+
+    if (mucDich === 'Bảo dưỡng sửa chữa' && SELECTED_HIEN_TUONG.length) {
+      box.innerHTML = '<div class="suggest-row suggest-empty">Các hiện tượng đã chọn chưa được gán cụm linh kiện/vật tư liên quan trong dữ liệu.</div>';
+    } else {
+      box.innerHTML = '<div class="suggest-row suggest-empty">Không có vật tư phù hợp để chọn thêm.</div>';
+    }
+
+    return;
   }
 
-  return;
-}
-
   const groups = groupBy(list, item => getCumLinhKien(item) || 'Khác');
+
   box.classList.remove('hidden');
   box.innerHTML = Object.keys(groups).sort().map(groupName => {
     const rows = groups[groupName].map(item => {
@@ -1188,7 +1253,9 @@ function renderVatTuSearch() {
 function selectMaterialFromSearch(id, checked) {
   if (!checked) return;
 
-  const sourceItem = APP.vatTu.find(x => makeMaterialId(x) === id) || APP.vatTuCoDinh.find(x => makeMaterialId(x) === id);
+  const sourceItem = APP.vatTu.find(x => makeMaterialId(x) === id)
+    || APP.vatTuCoDinh.find(x => makeMaterialId(x) === id);
+
   if (!sourceItem) return;
 
   const qtyEl = document.getElementById('qty_search_' + cssId(id));
@@ -1213,18 +1280,21 @@ function selectMaterialFromSearch(id, checked) {
 
 function addOrUpdateSelected(item) {
   const idx = APP.selected.findIndex(x => x.id === item.id);
+
   if (idx >= 0) APP.selected[idx] = { ...APP.selected[idx], ...item };
   else APP.selected.push(item);
 }
 
 function removeSelectedMaterial(id) {
   const item = APP.selected.find(x => x.id === id);
+
   if (item && item.fixed) {
     alert('Vật tư cố định không nên bỏ chọn. Nếu vẫn không cần mang đi, có thể sửa số lượng về 0.');
     return;
   }
 
   APP.selected = APP.selected.filter(x => x.id !== id);
+
   renderVatTuSearch();
   renderSelectedItems();
 }
@@ -1250,6 +1320,7 @@ function renderSelectedItems() {
 
   box.innerHTML = APP.selected.map(item => {
     const id = item.id;
+
     const removeBtn = item.fixed
       ? '<small>Vật tư cố định</small>'
       : `<button type="button" class="small-btn danger" onclick="removeSelectedMaterial('${escapeJs(id)}')">Bỏ</button>`;
@@ -1257,9 +1328,14 @@ function renderSelectedItems() {
     return `
       <div class="item-row">
         <input type="checkbox" checked onchange="removeSelectedMaterial('${escapeJs(id)}')">
-        <div><b>${escapeHtml(item.tenVatTu)}</b><br><small>${escapeHtml(item.cumLinhKien || '')}${item.nguonVatTu ? ' - ' + escapeHtml(item.nguonVatTu) : ''}</small></div>
+        <div>
+          <b>${escapeHtml(item.tenVatTu)}</b><br>
+          <small>${escapeHtml(item.cumLinhKien || '')}${item.nguonVatTu ? ' - ' + escapeHtml(item.nguonVatTu) : ''}</small>
+        </div>
         <input type="number" min="0" step="1" value="${escapeHtml(item.soLuongCan)}" onchange="updateSelectedQty('${escapeJs(id)}', this.value)">
-        <select onchange="updateSelectedStatus('${escapeJs(id)}', this.value)">${statusOptions(item.tinhTrangXuatKho)}</select>
+        <select onchange="updateSelectedStatus('${escapeJs(id)}', this.value)">
+          ${statusOptions(item.tinhTrangXuatKho)}
+        </select>
         <div>${removeBtn}</div>
       </div>`;
   }).join('');
@@ -1271,11 +1347,23 @@ function statusOptions(current) {
 }
 
 function getTenVatTu(item) {
-  return String(getObjValue(item, ['Tên Chi Tiết / Linh Kiện Thay Thế', 'Tên chi tiết / linh kiện thay thế', 'Ten Chi Tiet / Linh Kien Thay The', 'Ten chi tiet / linh kien thay the', 'Tên vật tư', 'Ten vat tu']) || '').trim();
+  return String(getObjValue(item, [
+    'Tên Chi Tiết / Linh Kiện Thay Thế',
+    'Tên chi tiết / linh kiện thay thế',
+    'Ten Chi Tiet / Linh Kien Thay The',
+    'Ten chi tiet / linh kien thay the',
+    'Tên vật tư',
+    'Ten vat tu'
+  ]) || '').trim();
 }
 
 function getCumLinhKien(item) {
-  return String(getObjValue(item, ['Cụm Linh Kiện', 'Cụm linh kiện', 'Cum Linh Kien', 'Cum linh kien']) || '').trim();
+  return String(getObjValue(item, [
+    'Cụm Linh Kiện',
+    'Cụm linh kiện',
+    'Cum Linh Kien',
+    'Cum linh kien'
+  ]) || '').trim();
 }
 
 function makeMaterialId(item) {
@@ -1291,9 +1379,11 @@ function makeMaterialId(item) {
 
 function collectFormPayload() {
   const mucDich = getRadioValue('mucDich');
-const cuThe = mucDich === 'Bảo dưỡng sửa chữa'
-  ? SELECTED_HIEN_TUONG.join('; ')
-  : getValue('cuTheNhapTay').trim();
+
+  const cuThe = mucDich === 'Bảo dưỡng sửa chữa'
+    ? SELECTED_HIEN_TUONG.join('; ')
+    : getValue('cuTheNhapTay').trim();
+
   const maMay = getValue('maMay');
   const may = findMayByCode(maMay);
 
@@ -1336,10 +1426,14 @@ function validatePayloadClient(payload) {
   if (!payload.ngayGioXuatKho) return 'Vui lòng nhập ngày giờ xuất kho.';
   if (!payload.nguoiXuatKho) return 'Vui lòng chọn người xuất kho.';
   if (!payload.mucDich) return 'Vui lòng chọn mục đích.';
+
   if (payload.mucDich !== 'Bảo dưỡng sửa chữa' && !payload.cuThe) {
-  return 'Vui lòng nhập nội dung cụ thể.';
-}
-  if (!payload.items || !payload.items.length) return 'Vui lòng chọn vật tư.';
+    return 'Vui lòng nhập nội dung cụ thể.';
+  }
+
+  if (!payload.items || !payload.items.length) {
+    return 'Vui lòng chọn vật tư.';
+  }
 
   if (Array.isArray(payload.thanhVien) && payload.thanhVien.includes(payload.doiTruong)) {
     return 'Thành viên không được trùng với đội trưởng.';
@@ -1358,6 +1452,7 @@ async function previewCurrentForm() {
   if (err) return alert(err);
 
   setBusy(true, 'Đang tạo xem trước...');
+
   try {
     const html = await api('previewDraft', { token: TOKEN, payload });
     openPreviewHtml(html);
@@ -1374,15 +1469,20 @@ async function save() {
   if (err) return alert(err);
 
   setBusy(true, EDITING_MA_PHIEU ? 'Đang cập nhật phiếu...' : 'Đang lưu phiếu...');
+
   try {
     const res = EDITING_MA_PHIEU
       ? await api('updatePhieu', { token: TOKEN, maPhieu: EDITING_MA_PHIEU, payload })
       : await api('savePhieu', { token: TOKEN, payload });
 
     alert((EDITING_MA_PHIEU ? 'Đã cập nhật phiếu: ' : 'Đã lưu phiếu: ') + res.maPhieu);
+
     resetForm();
     await loadPhieuList(false);
-    const historyBtn = [...document.querySelectorAll('.nav')].find(btn => (btn.textContent || '').includes('Phiếu đã tạo'));
+
+    const historyBtn = [...document.querySelectorAll('.nav')]
+      .find(btn => (btn.textContent || '').includes('Phiếu đã tạo'));
+
     showTab('historyTab', historyBtn);
   } catch (err) {
     alert(err.message);
@@ -1410,18 +1510,25 @@ function resetForm() {
 
   setValue('maMay', '');
   onMayChange();
+
   setDefaultDateTime();
   setValue('nguoiXuatKho', '');
   setValue('ngayGioNhapKho', '');
   setValue('nguoiNhapKho', '');
+
   setRadioValue('mucDich', 'Bảo dưỡng sửa chữa');
+
   SELECTED_HIEN_TUONG = [];
   renderHienTuongDropdown();
   renderHienTuongText();
+
   setValue('cuTheNhapTay', '');
   setValue('searchVatTu', '');
+
   onMucDichChange();
   resetSelectedMaterials();
+
+  closeAllDropdowns();
   closeAllSearchPopups();
 }
 
@@ -1431,10 +1538,14 @@ function cancelEdit() {
 
 async function editPhieu(maPhieu) {
   setBusy(true, 'Đang tải phiếu để sửa...');
+
   try {
     const data = await api('getPhieuDetail', { token: TOKEN, maPhieu });
     fillFormFromPhieu(data.phieu, data.items);
-    const formBtn = [...document.querySelectorAll('.nav')].find(btn => (btn.textContent || '').includes('Tạo phiếu'));
+
+    const formBtn = [...document.querySelectorAll('.nav')]
+      .find(btn => (btn.textContent || '').includes('Tạo phiếu'));
+
     showTab('formTab', formBtn);
   } catch (err) {
     alert(err.message);
@@ -1456,12 +1567,18 @@ function fillFormFromPhieu(phieu, items) {
   if (cancelBtn) cancelBtn.classList.remove('hidden');
 
   setValue('doiTruong', phieu.doiTruong || '');
-  SELECTED_MEMBERS = String(phieu.thanhVien || '').split(';').map(x => x.trim()).filter(Boolean);
+
+  SELECTED_MEMBERS = String(phieu.thanhVien || '')
+    .split(';')
+    .map(x => x.trim())
+    .filter(Boolean);
+
   renderMemberDropdown();
   renderMemberText();
 
   setValue('maMay', phieu.maMay || '');
   onMayChange();
+
   setValue('ngayGioXuatKho', parseDateTimeToInput(phieu.ngayGioXuatKho));
   setValue('nguoiXuatKho', phieu.nguoiXuatKho || '');
   setValue('ngayGioNhapKho', parseDateTimeToInput(phieu.ngayGioNhapKho));
@@ -1471,22 +1588,26 @@ function fillFormFromPhieu(phieu, items) {
   onMucDichChange();
 
   if ((phieu.mucDich || '') === 'Bảo dưỡng sửa chữa') {
-  SELECTED_HIEN_TUONG = String(phieu.cuThe || '')
-    .split(';')
-    .map(x => x.trim())
-    .filter(Boolean);
+    SELECTED_HIEN_TUONG = String(phieu.cuThe || '')
+      .split(';')
+      .map(x => x.trim())
+      .filter(Boolean);
 
-  renderHienTuongDropdown();
-  renderHienTuongText();
-} else {
-  SELECTED_HIEN_TUONG = [];
-  renderHienTuongDropdown();
-  renderHienTuongText();
-  setValue('cuTheNhapTay', phieu.cuThe || '');
-}
+    renderHienTuongDropdown();
+    renderHienTuongText();
+  } else {
+    SELECTED_HIEN_TUONG = [];
+    renderHienTuongDropdown();
+    renderHienTuongText();
+    setValue('cuTheNhapTay', phieu.cuThe || '');
+  }
 
   APP.selected = (items || []).map(x => ({
-    id: makeMaterialId({ 'Cụm Linh Kiện': x.cumLinhKien, 'Tên Chi Tiết / Linh Kiện Thay Thế': x.tenVatTu, 'Mã vật tư': x.maVatTu }),
+    id: makeMaterialId({
+      'Cụm Linh Kiện': x.cumLinhKien,
+      'Tên Chi Tiết / Linh Kiện Thay Thế': x.tenVatTu,
+      'Mã vật tư': x.maVatTu
+    }),
     nguonVatTu: x.nguonVatTu || '',
     cumLinhKien: x.cumLinhKien || '',
     tenVatTu: x.tenVatTu || '',
@@ -1512,6 +1633,7 @@ async function loadPhieuList(silent) {
 
   const box = document.getElementById('phieuList');
   if (!box) return;
+
   if (!silent) box.innerHTML = '<i>Đang tải danh sách phiếu...</i>';
 
   try {
@@ -1536,7 +1658,16 @@ function renderPhieuList(list) {
       <table class="data-table">
         <thead>
           <tr>
-            <th>Mã phiếu</th><th>Ngày tạo</th><th>Mã máy</th><th>Tên trại</th><th>Đội trưởng</th><th>Thành viên</th><th>Mục đích</th><th>Cụ thể</th><th>Trạng thái</th><th>Thao tác</th>
+            <th>Mã phiếu</th>
+            <th>Ngày tạo</th>
+            <th>Mã máy</th>
+            <th>Tên trại</th>
+            <th>Đội trưởng</th>
+            <th>Thành viên</th>
+            <th>Mục đích</th>
+            <th>Cụ thể</th>
+            <th>Trạng thái</th>
+            <th>Thao tác</th>
           </tr>
         </thead>
         <tbody>
@@ -1566,6 +1697,7 @@ function renderPhieuList(list) {
 
 async function previewSavedPhieu(maPhieu) {
   setBusy(true, 'Đang mở xem trước...');
+
   try {
     const html = await api('previewPhieu', { token: TOKEN, maPhieu });
     openPreviewHtml(html);
@@ -1578,6 +1710,7 @@ async function previewSavedPhieu(maPhieu) {
 
 async function exportPdf(maPhieu) {
   setBusy(true, 'Đang xuất PDF...');
+
   try {
     const url = await api('exportPhieuPdf', { token: TOKEN, maPhieu });
     window.open(url, '_blank');
@@ -1591,6 +1724,7 @@ async function exportPdf(maPhieu) {
 
 async function exportWord(maPhieu) {
   setBusy(true, 'Đang xuất Word...');
+
   try {
     const url = await api('exportPhieuWord', { token: TOKEN, maPhieu });
     window.open(url, '_blank');
@@ -1605,14 +1739,21 @@ async function exportWord(maPhieu) {
 async function deletePhieuUI(maPhieu) {
   if (!maPhieu) return;
 
-  const ok = confirm('Bạn chắc chắn muốn xóa phiếu ' + maPhieu + '?\n\nThao tác này sẽ xóa dữ liệu ở sheet 10, sheet 11 và chuyển file PDF/Word vào thùng rác nếu có.');
+  const ok = confirm(
+    'Bạn chắc chắn muốn xóa phiếu ' + maPhieu + '?\n\n' +
+    'Thao tác này sẽ xóa dữ liệu ở sheet 10, sheet 11 và chuyển file PDF/Word vào thùng rác nếu có.'
+  );
+
   if (!ok) return;
 
   setBusy(true, 'Đang xóa phiếu...');
+
   try {
     await api('deletePhieu', { token: TOKEN, maPhieu });
     alert('Đã xóa phiếu: ' + maPhieu);
+
     if (EDITING_MA_PHIEU === maPhieu) resetForm();
+
     await loadPhieuList(false);
   } catch (err) {
     alert(err.message);
@@ -1631,6 +1772,7 @@ function openPreviewHtml(html) {
   if (!modal || !frame) return;
 
   modal.classList.remove('hidden');
+
   const doc = frame.contentWindow.document;
   doc.open();
   doc.write(html);
@@ -1640,6 +1782,7 @@ function openPreviewHtml(html) {
 function closePreview() {
   const modal = document.getElementById('previewModal');
   const frame = document.getElementById('previewFrame');
+
   if (modal) modal.classList.add('hidden');
 
   if (frame) {
@@ -1661,6 +1804,7 @@ async function loadAccounts(silent) {
 
   const box = document.getElementById('accountList');
   if (!box) return;
+
   if (!silent) box.innerHTML = '<i>Đang tải danh sách tài khoản...</i>';
 
   try {
@@ -1683,6 +1827,7 @@ function renderAccounts(list) {
 
   box.innerHTML = list.map(acc => {
     const status = String(acc.status || '').toLowerCase();
+
     return `
       <div class="account-row ${escapeHtml(status)}">
         <div><b>${escapeHtml(acc.username)}</b><br><small>${escapeHtml(acc.createdAt || '')}</small></div>
@@ -1704,6 +1849,7 @@ function renderStatusBadge(status) {
   if (status === 'active') return '<span class="badge badge-active">active</span>';
   if (status === 'pending') return '<span class="badge badge-pending">pending</span>';
   if (status === 'locked') return '<span class="badge badge-locked">locked</span>';
+
   return '<span class="badge">' + escapeHtml(status) + '</span>';
 }
 
@@ -1731,7 +1877,9 @@ function clearAccountForm() {
 }
 
 async function saveAccountUI() {
-  if (!CURRENT_USER || CURRENT_USER.role !== 'admin') return alert('Bạn không có quyền admin.');
+  if (!CURRENT_USER || CURRENT_USER.role !== 'admin') {
+    return alert('Bạn không có quyền admin.');
+  }
 
   const account = {
     rowNumber: getValue('accRow'),
@@ -1747,6 +1895,7 @@ async function saveAccountUI() {
   if (!account.fullName) return alert('Thiếu họ và tên.');
 
   setBusy(true, 'Đang lưu tài khoản...');
+
   try {
     await api('saveAccount', { token: TOKEN, account });
     clearAccountForm();
@@ -1761,6 +1910,7 @@ async function saveAccountUI() {
 
 async function setAccountStatusUI(rowNumber, status) {
   setBusy(true, 'Đang cập nhật trạng thái tài khoản...');
+
   try {
     await api('setAccountStatus', { token: TOKEN, rowNumber, status });
     await loadAccounts(false);
@@ -1834,6 +1984,7 @@ function getObjValue(obj, keys) {
   if (!obj) return '';
 
   const normKeys = keys.map(normText);
+
   for (const k in obj) {
     if (normKeys.includes(normText(k))) return obj[k];
   }
@@ -1853,7 +2004,13 @@ function normText(s) {
 
 function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, function (m) {
-    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
+    return {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    }[m];
   });
 }
 
