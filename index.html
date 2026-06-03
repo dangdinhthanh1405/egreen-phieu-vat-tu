@@ -87,9 +87,15 @@
           <div class="grid-2">
             <div>
               <label for="doiTruong">Đội trưởng *</label>
-              <select id="doiTruong" onchange="onDoiTruongChange()">
-                <option value="">-- Chọn đội trưởng --</option>
-              </select>
+              <input
+                id="doiTruong"
+                list="doiTruongList"
+                placeholder="-- Chọn hoặc gõ tên đội trưởng --"
+                autocomplete="off"
+                oninput="filterNameInput('doiTruong')"
+                onchange="onDoiTruongChange()"
+              >
+              <datalist id="doiTruongList"></datalist>
             </div>
 
             <div>
@@ -140,9 +146,14 @@
 
             <div>
               <label for="nguoiXuatKho">Thành viên xuất kho *</label>
-              <select id="nguoiXuatKho">
-                <option value="">-- Chọn người xuất kho --</option>
-              </select>
+              <input
+                id="nguoiXuatKho"
+                list="nguoiXuatKhoList"
+                placeholder="-- Chọn hoặc gõ người xuất kho --"
+                autocomplete="off"
+                oninput="filterNameInput('nguoiXuatKho')"
+              >
+              <datalist id="nguoiXuatKhoList"></datalist>
             </div>
 
             <div>
@@ -152,9 +163,14 @@
 
             <div>
               <label for="nguoiNhapKho">Người nhập kho</label>
-              <select id="nguoiNhapKho">
-                <option value="">-- Chọn người nhập kho --</option>
-              </select>
+              <input
+                id="nguoiNhapKho"
+                list="nguoiNhapKhoList"
+                placeholder="-- Chọn hoặc gõ người nhập kho --"
+                autocomplete="off"
+                oninput="filterNameInput('nguoiNhapKho')"
+              >
+              <datalist id="nguoiNhapKhoList"></datalist>
             </div>
           </div>
         </div>
@@ -356,6 +372,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>
