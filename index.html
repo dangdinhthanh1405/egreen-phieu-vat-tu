@@ -7,7 +7,7 @@
   <meta name="description" content="eGreen - Hệ thống tạo phiếu chuẩn bị vật tư">
   <title>eGreen - Phiếu vật tư</title>
 
-  <link rel="stylesheet" href="style.css?v=18">
+  <link rel="stylesheet" href="style.css?v=19">
 </head>
 
 <body>
@@ -87,15 +87,19 @@
           <div class="grid-2">
             <div>
               <label for="doiTruong">Đội trưởng *</label>
-              <input
-                id="doiTruong"
-                list="doiTruongList"
-                placeholder="-- Chọn hoặc gõ tên đội trưởng --"
-                autocomplete="off"
-                oninput="filterNameInput('doiTruong')"
-                onchange="onDoiTruongChange()"
-              >
-              <datalist id="doiTruongList"></datalist>
+
+              <div class="search-select" id="doiTruongBox">
+                <input
+                  id="doiTruong"
+                  placeholder="-- Chọn hoặc gõ tên đội trưởng --"
+                  autocomplete="off"
+                  oninput="filterNamePopup('doiTruong')"
+                  onfocus="openNamePopup('doiTruong')"
+                  onchange="onDoiTruongChange()"
+                >
+                <button type="button" class="search-select-arrow" onclick="toggleNamePopup('doiTruong')">▾</button>
+                <div id="doiTruongPopup" class="search-popup hidden"></div>
+              </div>
             </div>
 
             <div>
@@ -122,9 +126,19 @@
           <h3>2. Mã hệ thống đảm nhiệm</h3>
 
           <label for="maMay">Mã máy *</label>
-          <select id="maMay" onchange="onMayChange()">
-            <option value="">-- Chọn mã máy --</option>
-          </select>
+
+          <div class="search-select" id="maMayBox">
+            <input
+              id="maMay"
+              placeholder="-- Chọn hoặc gõ mã máy / tên trại / đơn vị --"
+              autocomplete="off"
+              oninput="filterMachinePopup()"
+              onfocus="openMachinePopup()"
+              onchange="onMayChange()"
+            >
+            <button type="button" class="search-select-arrow" onclick="toggleMachinePopup()">▾</button>
+            <div id="maMayPopup" class="search-popup machine-popup hidden"></div>
+          </div>
 
           <div class="info-grid">
             <div><b>Tên trại:</b> <span id="tenTrai"></span></div>
@@ -146,14 +160,18 @@
 
             <div>
               <label for="nguoiXuatKho">Thành viên xuất kho *</label>
-              <input
-                id="nguoiXuatKho"
-                list="nguoiXuatKhoList"
-                placeholder="-- Chọn hoặc gõ người xuất kho --"
-                autocomplete="off"
-                oninput="filterNameInput('nguoiXuatKho')"
-              >
-              <datalist id="nguoiXuatKhoList"></datalist>
+
+              <div class="search-select" id="nguoiXuatKhoBox">
+                <input
+                  id="nguoiXuatKho"
+                  placeholder="-- Chọn hoặc gõ người xuất kho --"
+                  autocomplete="off"
+                  oninput="filterNamePopup('nguoiXuatKho')"
+                  onfocus="openNamePopup('nguoiXuatKho')"
+                >
+                <button type="button" class="search-select-arrow" onclick="toggleNamePopup('nguoiXuatKho')">▾</button>
+                <div id="nguoiXuatKhoPopup" class="search-popup hidden"></div>
+              </div>
             </div>
 
             <div>
@@ -163,14 +181,18 @@
 
             <div>
               <label for="nguoiNhapKho">Người nhập kho</label>
-              <input
-                id="nguoiNhapKho"
-                list="nguoiNhapKhoList"
-                placeholder="-- Chọn hoặc gõ người nhập kho --"
-                autocomplete="off"
-                oninput="filterNameInput('nguoiNhapKho')"
-              >
-              <datalist id="nguoiNhapKhoList"></datalist>
+
+              <div class="search-select" id="nguoiNhapKhoBox">
+                <input
+                  id="nguoiNhapKho"
+                  placeholder="-- Chọn hoặc gõ người nhập kho --"
+                  autocomplete="off"
+                  oninput="filterNamePopup('nguoiNhapKho')"
+                  onfocus="openNamePopup('nguoiNhapKho')"
+                >
+                <button type="button" class="search-select-arrow" onclick="toggleNamePopup('nguoiNhapKho')">▾</button>
+                <div id="nguoiNhapKhoPopup" class="search-popup hidden"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -372,6 +394,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=21"></script>
+  <script src="app.js?v=22"></script>
 </body>
 </html>
