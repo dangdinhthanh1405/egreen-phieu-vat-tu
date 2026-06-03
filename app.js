@@ -13,6 +13,7 @@ const JSONP_CHUNK_SIZE = 1200;
 
 let TOKEN = '';
 let CURRENT_USER = null;
+
 let APP = {
   may: [],
   hienTuong: [],
@@ -566,17 +567,32 @@ function fillMachineSelect(keepValue) {
 
   select.innerHTML = '<option value="">-- Chọn mã máy --</option>';
 
-  APP.may.forEach(m => {
+  const machines = APP.may
+    .filter(m => getMayCode(m))
+    .sort((a, b) => getMayCode(a).localeCompare(getMayCode(b), 'vi'));
+
+  machines.forEach(m => {
     const maMay = getMayCode(m);
-    if (!maMay) return;
 
     const opt = document.createElement('option');
     opt.value = maMay;
+
+    // Chỉ hiển thị mã máy cho gọn, nếu muốn dễ chọn hơn thì có thể thêm tên trại phía sau.
     opt.textContent = maMay;
+
+    opt.dataset.tenTrai = getTenTrai(m);
+    opt.dataset.donVi = getDonVi(m);
+    opt.dataset.khuVuc = getKhuVuc(m);
+    opt.dataset.tinhTP = getTinhTP(m);
+
     select.appendChild(opt);
   });
 
-  if (keepValue && oldValue) select.value = oldValue;
+  if (keepValue && oldValue) {
+    select.value = oldValue;
+  }
+
+  onMayChange();
 }
 
 function fillHienTuongSelect(keepValue) {
@@ -588,7 +604,15 @@ function fillHienTuongSelect(keepValue) {
   select.innerHTML = '<option value="">-- Chọn hiện tượng --</option>';
 
   const list = APP.hienTuong
-    .map(x => getObjValue(x, ['Hiện tượng/Sự cố', 'Hiện tượng', 'Hien tuong', 'Sự cố', 'Lỗi']))
+    .map(x => getObjValue(x, [
+      'Hiện Tượng/Sự cố',
+      'Hiện tượng/Sự cố',
+      'Hiện tượng/sự cố',
+      'Hiện tượng',
+      'Hien tuong',
+      'Sự cố',
+      'Lỗi'
+    ]))
     .filter(Boolean);
 
   uniqueArray(list).forEach(name => {
@@ -692,19 +716,111 @@ function renderMemberText() {
   text.textContent = SELECTED_MEMBERS.join('; ');
 }
 
+
+/****************************************************
+ * MACHINE INFO
+ ****************************************************/
+
 function onMayChange() {
   const maMay = getValue('maMay');
-  const may = APP.may.find(x => getMayCode(x) === maMay);
+  const may = findMayByCode(maMay);
 
-  setText('tenTrai', may ? getObjValue(may, ['Tên trại', 'Ten trai', 'Trại', 'Địa chỉ trại']) : '');
-  setText('donVi', may ? getObjValue(may, ['Đơn vị', 'Don vi']) : '');
-  setText('khuVuc', may ? getObjValue(may, ['Khu vực', 'Khu Vực', 'Khu vuc']) : '');
-  setText('tinhTP', may ? getObjValue(may, ['Tỉnh/TP', 'Tinh/TP', 'Tỉnh TP', 'Tỉnh']) : '');
+  if (!may) {
+    setText('tenTrai', '');
+    setText('donVi', '');
+    setText('khuVuc', '');
+    setText('tinhTP', '');
+    return;
+  }
+
+  setText('tenTrai', getTenTrai(may));
+  setText('donVi', getDonVi(may));
+  setText('khuVuc', getKhuVuc(may));
+  setText('tinhTP', getTinhTP(may));
 }
 
 function getMayCode(obj) {
-  return String(getObjValue(obj, ['Mã máy', 'Ma may', 'Mã Máy', 'Code', 'Mã']) || '').trim();
+  return String(getObjValue(obj, [
+    'Mã Máy',
+    'Mã máy',
+    'Ma May',
+    'Ma may',
+    'Mã hệ thống',
+    'Mã máy phát',
+    'Code',
+    'Mã'
+  ]) || '').trim();
 }
+
+function findMayByCode(maMay) {
+  const codeNorm = normText(maMay);
+
+  if (!codeNorm) return null;
+
+  return APP.may.find(row => {
+    return normText(getMayCode(row)) === codeNorm;
+  }) || null;
+}
+
+function getCurrentMachine() {
+  const maMay = getValue('maMay');
+  return findMayByCode(maMay);
+}
+
+function getTenTrai(may) {
+  return String(getObjValue(may, [
+    'Tên Trang Trại / Đơn Vị',
+    'Tên trang trại / đơn vị',
+    'Ten Trang Trai / Don Vi',
+    'Tên Trang Trại',
+    'Tên trang trại',
+    'Tên trại',
+    'Ten trai',
+    'Trang trại',
+    'Trang trai',
+    'Địa chỉ trại'
+  ]) || '').trim();
+}
+
+function getDonVi(may) {
+  return String(getObjValue(may, [
+    'Đơn vị hợp tác',
+    'Đơn Vị Hợp Tác',
+    'Don vi hop tac',
+    'Đơn vị',
+    'Đơn Vị',
+    'Don vi'
+  ]) || '').trim();
+}
+
+function getKhuVuc(may) {
+  return String(getObjValue(may, [
+    'Khu Vực',
+    'Khu vực',
+    'Khu Vuc',
+    'Khu vuc'
+  ]) || '').trim();
+}
+
+function getTinhTP(may) {
+  return String(getObjValue(may, [
+    'Tỉnh Thành',
+    'Tỉnh thành',
+    'Tinh Thanh',
+    'Tỉnh/TP',
+    'Tinh/TP',
+    'Tỉnh / TP',
+    'Tỉnh',
+    'Tinh',
+    'Thành phố',
+    'Thanh pho'
+  ]) || '').trim();
+}
+
+
+/****************************************************
+ * PURPOSE / DATE
+ ****************************************************/
 
 function onMucDichChange() {
   const mucDich = getRadioValue('mucDich');
@@ -744,7 +860,7 @@ function resetSelectedMaterials() {
       nguonVatTu: 'Cố định',
       cumLinhKien: getCumLinhKien(item),
       tenVatTu: getTenVatTu(item),
-      maVatTu: getObjValue(item, ['Mã vật tư', 'Ma vat tu']) || '',
+      maVatTu: getObjValue(item, ['Mã vật tư', 'Ma vat tu', 'Mã Vật Tư']) || '',
       donViTinh: getObjValue(item, ['ĐVT', 'Đơn vị tính', 'DVT']) || '',
       soLuongCan: normalizeQty(getObjValue(item, ['Số lượng', 'SL', 'Số lượng cần']) || 1),
       tinhTrangXuatKho: getObjValue(item, ['Tình trạng', 'Tinh trang']) || 'Mới',
@@ -764,21 +880,18 @@ function getFixedMaterials() {
 function getSelectableMaterials() {
   const mucDich = getRadioValue('mucDich');
 
-  // Nếu là lắp đặt / sản xuất thì cho hiện toàn bộ vật tư
   if (mucDich !== 'Bảo dưỡng sửa chữa') {
     return APP.vatTu.filter(x => getTenVatTu(x));
   }
 
   const hienTuong = getValue('hienTuong');
 
-  // Nếu chưa chọn hiện tượng thì chưa hiện vật tư chọn thêm
   if (!hienTuong) {
     return [];
   }
 
   const relatedCums = getRelatedCumsByHienTuong(hienTuong);
 
-  // Nếu hiện tượng chưa được gán cụm linh kiện ở sheet 3 thì không bung toàn bộ vật tư
   if (!relatedCums.length) {
     return [];
   }
@@ -807,7 +920,9 @@ function getRelatedCumsByHienTuong(hienTuong) {
       'Hiện tượng/Sự cố',
       'Hiện tượng/sự cố',
       'Hien Tuong/Su co',
-      'Hien tuong/Su co'
+      'Hien tuong/Su co',
+      'Hiện tượng',
+      'Sự cố'
     ]);
 
     if (normText(tenHienTuong) !== htNorm) return;
@@ -816,7 +931,9 @@ function getRelatedCumsByHienTuong(hienTuong) {
       'Cụm Linh Kiện Liên Quan',
       'Cụm linh kiện liên quan',
       'Cum Linh Kien Lien Quan',
-      'Cum linh kien lien quan'
+      'Cum linh kien lien quan',
+      'Cụm Linh Kiện',
+      'Cụm linh kiện'
     ]);
 
     if (!cumLienQuan) return;
@@ -849,7 +966,7 @@ function renderVatTuSearch() {
     const haystack = normText([
       getTenVatTu(item),
       getCumLinhKien(item),
-      getObjValue(item, ['Mã vật tư', 'Ma vat tu']),
+      getObjValue(item, ['Mã vật tư', 'Ma vat tu', 'Mã Vật Tư']),
       getObjValue(item, ['Ghi chú', 'Ghi chu'])
     ].join(' '));
 
@@ -857,21 +974,21 @@ function renderVatTuSearch() {
   });
 
   if (!list.length) {
-  box.classList.remove('hidden');
+    box.classList.remove('hidden');
 
-  const mucDich = getRadioValue('mucDich');
-  const hienTuong = getValue('hienTuong');
+    const mucDich = getRadioValue('mucDich');
+    const hienTuong = getValue('hienTuong');
 
-  if (mucDich === 'Bảo dưỡng sửa chữa' && !hienTuong) {
-    box.innerHTML = '<div class="suggest-row suggest-empty">Vui lòng chọn hiện tượng trước để lọc vật tư liên quan.</div>';
-  } else if (mucDich === 'Bảo dưỡng sửa chữa') {
-    box.innerHTML = '<div class="suggest-row suggest-empty">Hiện tượng này chưa được gán cụm linh kiện/vật tư liên quan trong dữ liệu.</div>';
-  } else {
-    box.innerHTML = '<div class="suggest-row suggest-empty">Không có vật tư phù hợp để chọn thêm.</div>';
+    if (mucDich === 'Bảo dưỡng sửa chữa' && !hienTuong) {
+      box.innerHTML = '<div class="suggest-row suggest-empty">Vui lòng chọn hiện tượng trước để lọc vật tư liên quan.</div>';
+    } else if (mucDich === 'Bảo dưỡng sửa chữa') {
+      box.innerHTML = '<div class="suggest-row suggest-empty">Hiện tượng này chưa được gán cụm linh kiện/vật tư liên quan trong dữ liệu.</div>';
+    } else {
+      box.innerHTML = '<div class="suggest-row suggest-empty">Không có vật tư phù hợp để chọn thêm.</div>';
+    }
+
+    return;
   }
-
-  return;
-}
 
   const groups = groupBy(list, item => getCumLinhKien(item) || 'Khác');
 
@@ -881,7 +998,7 @@ function renderVatTuSearch() {
     const rows = groups[groupName].map(item => {
       const id = makeMaterialId(item);
       const ten = getTenVatTu(item);
-      const maVatTu = getObjValue(item, ['Mã vật tư', 'Ma vat tu']) || '';
+      const maVatTu = getObjValue(item, ['Mã vật tư', 'Ma vat tu', 'Mã Vật Tư']) || '';
       const dvt = getObjValue(item, ['ĐVT', 'Đơn vị tính', 'DVT']) || '';
 
       return `
@@ -927,7 +1044,7 @@ function selectMaterialFromSearch(id, checked) {
     nguonVatTu: 'Chọn thêm',
     cumLinhKien: getCumLinhKien(sourceItem),
     tenVatTu: getTenVatTu(sourceItem),
-    maVatTu: getObjValue(sourceItem, ['Mã vật tư', 'Ma vat tu']) || '',
+    maVatTu: getObjValue(sourceItem, ['Mã vật tư', 'Ma vat tu', 'Mã Vật Tư']) || '',
     donViTinh: getObjValue(sourceItem, ['ĐVT', 'Đơn vị tính', 'DVT']) || '',
     soLuongCan: normalizeQty(qtyEl ? qtyEl.value : 1),
     tinhTrangXuatKho: statusEl ? statusEl.value : 'Mới',
@@ -1046,7 +1163,7 @@ function getCumLinhKien(item) {
 function makeMaterialId(item) {
   const ten = getTenVatTu(item);
   const cum = getCumLinhKien(item);
-  const ma = getObjValue(item, ['Mã vật tư', 'Ma vat tu']) || '';
+  const ma = getObjValue(item, ['Mã vật tư', 'Ma vat tu', 'Mã Vật Tư']) || '';
 
   return normText(cum + '|' + ten + '|' + ma);
 }
@@ -1067,23 +1184,31 @@ function collectFormPayload() {
     cuThe = getValue('cuTheNhapTay').trim();
   }
 
-  const may = getCurrentMachine();
+  const maMay = getValue('maMay');
+  const may = findMayByCode(maMay);
 
   return {
     doiTruong: getValue('doiTruong'),
     thanhVien: SELECTED_MEMBERS.slice(),
-    maMay: getValue('maMay'),
-    tenTrai: may ? getObjValue(may, ['Tên trại', 'Ten trai', 'Trại', 'Địa chỉ trại']) : getText('tenTrai'),
-    donVi: may ? getObjValue(may, ['Đơn vị', 'Don vi']) : getText('donVi'),
-    khuVuc: may ? getObjValue(may, ['Khu vực', 'Khu Vực', 'Khu vuc']) : getText('khuVuc'),
-    tinhTP: may ? getObjValue(may, ['Tỉnh/TP', 'Tinh/TP', 'Tỉnh TP', 'Tỉnh']) : getText('tinhTP'),
+
+    maMay: maMay,
+
+    // Đọc đúng theo sheet 2:
+    // Mã Máy, Đơn vị hợp tác, Tên Trang Trại / Đơn Vị, Khu Vực, Tỉnh Thành
+    tenTrai: may ? getTenTrai(may) : getText('tenTrai'),
+    donVi: may ? getDonVi(may) : getText('donVi'),
+    khuVuc: may ? getKhuVuc(may) : getText('khuVuc'),
+    tinhTP: may ? getTinhTP(may) : getText('tinhTP'),
+
     ngayGioXuatKho: getValue('ngayGioXuatKho'),
     nguoiXuatKho: getValue('nguoiXuatKho'),
     ngayGioNhapKho: getValue('ngayGioNhapKho'),
     nguoiNhapKho: getValue('nguoiNhapKho'),
+
     mucDich,
     cuThe,
     ghiChu: '',
+
     items: APP.selected.map((x, idx) => ({
       stt: idx + 1,
       nguonVatTu: x.nguonVatTu || '',
@@ -1117,13 +1242,6 @@ function validatePayloadClient(payload) {
   }
 
   return '';
-}
-
-function getCurrentMachine() {
-  const maMay = getValue('maMay');
-  if (!maMay) return null;
-
-  return APP.may.find(x => getMayCode(x) === maMay) || null;
 }
 
 
