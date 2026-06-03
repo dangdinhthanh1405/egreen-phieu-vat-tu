@@ -1200,9 +1200,9 @@ function collectFormPayload() {
     khuVuc: may ? getKhuVuc(may) : getText('khuVuc'),
     tinhTP: may ? getTinhTP(may) : getText('tinhTP'),
 
-    ngayGioXuatKho: getValue('ngayGioXuatKho'),
+    ngayGioXuatKho: formatDateTimeForPayload(getValue('ngayGioXuatKho')),
     nguoiXuatKho: getValue('nguoiXuatKho'),
-    ngayGioNhapKho: getValue('ngayGioNhapKho'),
+    ngayGioNhapKho: formatDateTimeForPayload(getValue('ngayGioNhapKho')),
     nguoiNhapKho: getValue('nguoiNhapKho'),
 
     mucDich,
@@ -1945,4 +1945,18 @@ function parseDateTimeToInput(value) {
   }
 
   return '';
+}
+function formatDateTimeForPayload(value) {
+  if (!value) return '';
+
+  const s = String(value).trim();
+
+  // Dạng từ input datetime-local: 2026-06-03T13:54
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (m) {
+    return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
+  }
+
+  // Nếu đã là dạng đẹp rồi thì giữ nguyên
+  return s.replace('T', ' ');
 }
