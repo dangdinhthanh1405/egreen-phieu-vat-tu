@@ -1,10 +1,11 @@
 /****************************************************
  * eGreen - Phiếu vật tư
  * Frontend app.js for GitHub Pages
- * Full optimized version
+ * Optimized version
+ * Lưu ý: Dán URL Apps Script Web App vào API_URL sau khi copy file.
  ****************************************************/
 
-const API_URL = 'https://script.google.com/macros/s/AKfycbzHLLluZUBFv8phpB4gwU9NksMvAYpXlVawXLuoQvqKJ5Q6CfOSN6qpN1IqZR4pOZAu/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbxvCSISV1WuGkEabski6gwtdJKy_BDK7BJNgAUBONmQxMlbbgaVaEXXlznApsJGzFin/exec'; // Dán URL Apps Script Web App vào đây
 
 const STORAGE_KEY = 'EGREEN_PHIEU_VAT_TU_SESSION_V2';
 const AUTO_REFRESH_MS = 30000;
@@ -13,6 +14,12 @@ const JSONP_CHUNK_SIZE = 1200;
 
 let TOKEN = '';
 let CURRENT_USER = null;
+let ACCOUNT_CACHE = [];
+let SELECTED_MEMBERS = [];
+let AUTO_REFRESH_TIMER = null;
+let EDITING_MA_PHIEU = '';
+let IS_BUSY = false;
+let IS_BOOTING = false;
 
 let APP = {
   may: [],
@@ -22,14 +29,6 @@ let APP = {
   vatTuCoDinh: [],
   selected: []
 };
-
-let ACCOUNT_CACHE = [];
-let SELECTED_MEMBERS = [];
-let AUTO_REFRESH_TIMER = null;
-let EDITING_MA_PHIEU = '';
-let IS_BUSY = false;
-let IS_BOOTING = false;
-
 
 /****************************************************
  * BOOT
@@ -62,40 +61,22 @@ function bindGlobalEvents() {
 
     if (isLoginVisible && e.key === 'Enter') {
       const target = e.target;
-
-      if (
-        target &&
-        (
-          target.id === 'loginUsername' ||
-          target.id === 'loginPassword' ||
-          target.closest('.login-card')
-        )
-      ) {
+      if (target && (target.id === 'loginUsername' || target.id === 'loginPassword' || target.closest('.login-card'))) {
         e.preventDefault();
         doLogin();
       }
     }
   });
 
-  const loginUsername = document.getElementById('loginUsername');
-  const loginPassword = document.getElementById('loginPassword');
-
-  [loginUsername, loginPassword].forEach(el => {
+  ['loginUsername', 'loginPassword'].forEach(id => {
+    const el = document.getElementById(id);
     if (!el) return;
-
-    el.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        doLogin();
-      }
-    });
+    el.addEventListener('keydown', loginKeydown);
   });
 }
 
 function loginKeydown(e) {
-  if (!e) return;
-
-  if (e.key === 'Enter') {
+  if (e && e.key === 'Enter') {
     e.preventDefault();
     doLogin();
   }
@@ -115,7 +96,6 @@ async function bootApp() {
   const loginPage = document.getElementById('loginPage');
   const appPage = document.getElementById('appPage');
   const msg = document.getElementById('loginMsg');
-
   const saved = loadSavedSession();
 
   if (!saved || !saved.token) {
@@ -138,39 +118,28 @@ async function bootApp() {
 
   try {
     const data = await api('getAppData', { token: TOKEN });
-
     initApp(data);
     startAutoRefresh();
-
     if (msg) msg.innerText = '';
   } catch (err) {
     clearSavedSession();
-
     TOKEN = '';
     CURRENT_USER = null;
 
     if (appPage) appPage.classList.add('hidden');
     if (loginPage) loginPage.classList.remove('hidden');
-
-    if (msg) {
-      msg.innerText = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
-    }
+    if (msg) msg.innerText = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
   } finally {
     IS_BOOTING = false;
   }
 }
-
 
 /****************************************************
  * API JSONP
  ****************************************************/
 
 function api(action, data = {}) {
-  const payload = {
-    action,
-    data
-  };
-
+  const payload = { action, data };
   const text = JSON.stringify(payload);
 
   if (text.length <= JSONP_DIRECT_LIMIT) {
@@ -180,17 +149,28 @@ function api(action, data = {}) {
   return apiJsonpChunk_(payload);
 }
 
+function assertApiUrl_() {
+  if (!API_URL || !/^https:\/\/script\.google\.com\/macros\/s\//.test(API_URL)) {
+    throw new Error('Chưa cấu hình API_URL trong app.js. Hãy dán URL Web App Apps Script vào biến API_URL.');
+  }
+}
+
 function apiJsonpDirect_(payload) {
   return new Promise((resolve, reject) => {
+    try {
+      assertApiUrl_();
+    } catch (err) {
+      reject(err);
+      return;
+    }
+
     const callbackName = '__egreen_cb_' + Date.now() + '_' + Math.random().toString(36).slice(2);
     const script = document.createElement('script');
-
     let finished = false;
 
     window[callbackName] = function (res) {
       if (finished) return;
       finished = true;
-
       cleanupJsonp_(script, callbackName);
 
       if (!res || res.success === false) {
@@ -204,24 +184,20 @@ function apiJsonpDirect_(payload) {
     script.onerror = function () {
       if (finished) return;
       finished = true;
-
       cleanupJsonp_(script, callbackName);
       reject(new Error('Không gọi được Apps Script API. Kiểm tra API_URL hoặc quyền Web App.'));
     };
 
-    const url =
-      API_URL +
-      '?callback=' + encodeURIComponent(callbackName) +
-      '&payload=' + encodeURIComponent(JSON.stringify(payload)) +
-      '&_=' + Date.now();
+    script.src = API_URL
+      + '?callback=' + encodeURIComponent(callbackName)
+      + '&payload=' + encodeURIComponent(JSON.stringify(payload))
+      + '&_=' + Date.now();
 
-    script.src = url;
     document.body.appendChild(script);
 
     setTimeout(() => {
       if (finished) return;
       finished = true;
-
       cleanupJsonp_(script, callbackName);
       reject(new Error('API phản hồi quá lâu. Vui lòng thử lại.'));
     }, 45000);
@@ -232,25 +208,16 @@ async function apiJsonpChunk_(payload) {
   const key = 'chunk_' + Date.now() + '_' + Math.random().toString(36).slice(2);
   const text = JSON.stringify(payload);
 
-  await apiJsonpDirect_({
-    action: '__chunkStart',
-    data: { key }
-  });
+  await apiJsonpDirect_({ action: '__chunkStart', data: { key } });
 
   for (let i = 0; i < text.length; i += JSONP_CHUNK_SIZE) {
     await apiJsonpDirect_({
       action: '__chunkAppend',
-      data: {
-        key,
-        chunk: text.slice(i, i + JSONP_CHUNK_SIZE)
-      }
+      data: { key, chunk: text.slice(i, i + JSONP_CHUNK_SIZE) }
     });
   }
 
-  return apiJsonpDirect_({
-    action: '__chunkFinish',
-    data: { key }
-  });
+  return apiJsonpDirect_({ action: '__chunkFinish', data: { key } });
 }
 
 function cleanupJsonp_(script, callbackName) {
@@ -265,7 +232,6 @@ function cleanupJsonp_(script, callbackName) {
   }
 }
 
-
 /****************************************************
  * SESSION / LOGIN
  ****************************************************/
@@ -273,9 +239,7 @@ function cleanupJsonp_(script, callbackName) {
 function loadSavedSession() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-
-    return JSON.parse(raw);
+    return raw ? JSON.parse(raw) : null;
   } catch (e) {
     return null;
   }
@@ -292,14 +256,12 @@ function saveSession() {
     return;
   }
 
-  const data = {
-    token: TOKEN,
-    user: CURRENT_USER,
-    savedAt: new Date().toISOString()
-  };
-
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      token: TOKEN,
+      user: CURRENT_USER,
+      savedAt: new Date().toISOString()
+    }));
   } catch (e) {}
 }
 
@@ -321,28 +283,19 @@ async function doLogin() {
   }
 
   if (IS_BUSY) return;
-
   if (msg) msg.innerText = 'Đang đăng nhập...';
   if (loginBtn) loginBtn.disabled = true;
 
   try {
-    const res = await api('login', {
-      username,
-      password
-    });
-
+    const res = await api('login', { username, password });
     TOKEN = res.token;
     CURRENT_USER = res.user;
-
     saveSession();
-
     initApp(res.appData);
     startAutoRefresh();
-
     if (msg) msg.innerText = '';
   } catch (err) {
     clearSavedSession();
-
     if (msg) msg.innerText = 'Lỗi đăng nhập: ' + err.message;
   } finally {
     if (loginBtn) loginBtn.disabled = false;
@@ -351,19 +304,15 @@ async function doLogin() {
 
 async function doLogout() {
   try {
-    if (TOKEN) {
-      await api('logout', { token: TOKEN });
-    }
+    if (TOKEN) await api('logout', { token: TOKEN });
   } catch (e) {}
 
   stopAutoRefresh();
-
   TOKEN = '';
   CURRENT_USER = null;
   ACCOUNT_CACHE = [];
   SELECTED_MEMBERS = [];
   EDITING_MA_PHIEU = '';
-
   clearSavedSession();
 
   const loginPage = document.getElementById('loginPage');
@@ -373,10 +322,8 @@ async function doLogout() {
   if (appPage) appPage.classList.add('hidden');
   if (loginPage) loginPage.classList.remove('hidden');
   if (msg) msg.innerText = '';
-
   setValue('loginPassword', '');
 }
-
 
 /****************************************************
  * INIT APP
@@ -394,27 +341,22 @@ function initApp(data) {
 
   const loginPage = document.getElementById('loginPage');
   const appPage = document.getElementById('appPage');
-
   if (loginPage) loginPage.classList.add('hidden');
   if (appPage) appPage.classList.remove('hidden');
 
   renderUserBox();
   setupRoleUI();
-
   fillKtvSelects();
   fillMachineSelect();
   fillHienTuongSelect();
-
   setDefaultDateTime();
   resetSelectedMaterials();
   renderSelectedItems();
-
   showFirstAvailableTab();
-
   loadPhieuList(true);
 
   if (CURRENT_USER && CURRENT_USER.role === 'admin') {
-    loadAccounts();
+    loadAccounts(true);
   }
 }
 
@@ -422,45 +364,31 @@ function renderUserBox() {
   const userBox = document.getElementById('userBox');
   if (!userBox || !CURRENT_USER) return;
 
-  userBox.innerHTML = `
-    <b>${escapeHtml(CURRENT_USER.fullName || CURRENT_USER.username)}</b><br>
-    Vai trò: ${escapeHtml(CURRENT_USER.role || '')}
-  `;
+  userBox.innerHTML = `<b>${escapeHtml(CURRENT_USER.fullName || CURRENT_USER.username)}</b><br>Vai trò: ${escapeHtml(CURRENT_USER.role || '')}`;
 }
 
 function setupRoleUI() {
   const adminNav = document.getElementById('adminNav');
-
   if (!adminNav || !CURRENT_USER) return;
 
-  if (CURRENT_USER.role === 'admin') {
-    adminNav.classList.remove('hidden');
-  } else {
-    adminNav.classList.add('hidden');
-  }
+  if (CURRENT_USER.role === 'admin') adminNav.classList.remove('hidden');
+  else adminNav.classList.add('hidden');
 }
 
 function showFirstAvailableTab() {
   const active = document.querySelector('.nav.active');
-
-  if (active) {
-    const text = active.textContent || '';
-    if (text.includes('Phiếu đã tạo')) {
-      showTab('historyTab', active);
-      return;
-    }
+  if (active && (active.textContent || '').includes('Phiếu đã tạo')) {
+    showTab('historyTab', active);
+    return;
   }
 
-  const firstNav = document.querySelector('.nav');
-  showTab('formTab', firstNav);
+  showTab('formTab', document.querySelector('.nav'));
 }
 
 function startAutoRefresh() {
   stopAutoRefresh();
-
   AUTO_REFRESH_TIMER = setInterval(async () => {
     if (!TOKEN || IS_BUSY || IS_BOOTING) return;
-
     try {
       await silentRefreshData();
     } catch (e) {
@@ -485,14 +413,10 @@ async function silentRefreshData() {
   APP.ktv = Array.isArray(data.ktv) ? data.ktv : [];
   APP.vatTuCoDinh = Array.isArray(data.vatTuCoDinh) ? data.vatTuCoDinh : [];
 
-  const oldUser = CURRENT_USER;
   CURRENT_USER = data.currentUser || CURRENT_USER;
-
-  if (!oldUser || JSON.stringify(oldUser) !== JSON.stringify(CURRENT_USER)) {
-    renderUserBox();
-    setupRoleUI();
-    saveSession();
-  }
+  renderUserBox();
+  setupRoleUI();
+  saveSession();
 
   fillKtvSelects(true);
   fillMachineSelect(true);
@@ -501,16 +425,13 @@ async function silentRefreshData() {
   renderSelectedItems();
 
   const historyTab = document.getElementById('historyTab');
-  if (historyTab && !historyTab.classList.contains('hidden')) {
-    await loadPhieuList(true);
-  }
+  if (historyTab && !historyTab.classList.contains('hidden')) await loadPhieuList(true);
 
   const adminTab = document.getElementById('adminTab');
   if (CURRENT_USER && CURRENT_USER.role === 'admin' && adminTab && !adminTab.classList.contains('hidden')) {
     await loadAccounts(true);
   }
 }
-
 
 /****************************************************
  * TABS
@@ -522,18 +443,11 @@ function showTab(tabId, btn) {
 
   const tab = document.getElementById(tabId);
   if (tab) tab.classList.remove('hidden');
-
   if (btn) btn.classList.add('active');
 
-  if (tabId === 'historyTab') {
-    loadPhieuList(true);
-  }
-
-  if (tabId === 'adminTab') {
-    loadAccounts(true);
-  }
+  if (tabId === 'historyTab') loadPhieuList(true);
+  if (tabId === 'adminTab') loadAccounts(true);
 }
-
 
 /****************************************************
  * SELECT DATA
@@ -541,22 +455,17 @@ function showTab(tabId, btn) {
 
 function fillKtvSelects(keepValue) {
   const names = getKtvNames();
-
   fillSelect('doiTruong', names, '-- Chọn đội trưởng --', keepValue);
   fillSelect('nguoiXuatKho', names, '-- Chọn người xuất kho --', keepValue);
   fillSelect('nguoiNhapKho', names, '-- Chọn người nhập kho --', keepValue);
-
   renderMemberDropdown();
 }
 
 function getKtvNames() {
-  const names = APP.ktv
+  return uniqueArray(APP.ktv
     .map(x => getObjValue(x, ['Họ Và Tên', 'Họ và tên', 'Tên kỹ thuật', 'Tên', 'Ho Va Ten']))
-    .filter(Boolean)
-    .map(x => String(x).trim())
-    .filter(Boolean);
-
-  return uniqueArray(names);
+    .map(x => String(x || '').trim())
+    .filter(Boolean));
 }
 
 function fillMachineSelect(keepValue) {
@@ -564,34 +473,24 @@ function fillMachineSelect(keepValue) {
   if (!select) return;
 
   const oldValue = keepValue ? select.value : '';
-
   select.innerHTML = '<option value="">-- Chọn mã máy --</option>';
 
-  const machines = APP.may
+  APP.may
     .filter(m => getMayCode(m))
-    .sort((a, b) => getMayCode(a).localeCompare(getMayCode(b), 'vi'));
+    .sort((a, b) => getMayCode(a).localeCompare(getMayCode(b), 'vi'))
+    .forEach(m => {
+      const maMay = getMayCode(m);
+      const opt = document.createElement('option');
+      opt.value = maMay;
+      opt.textContent = maMay;
+      opt.dataset.tenTrai = getTenTrai(m);
+      opt.dataset.donVi = getDonVi(m);
+      opt.dataset.khuVuc = getKhuVuc(m);
+      opt.dataset.tinhTP = getTinhTP(m);
+      select.appendChild(opt);
+    });
 
-  machines.forEach(m => {
-    const maMay = getMayCode(m);
-
-    const opt = document.createElement('option');
-    opt.value = maMay;
-
-    // Chỉ hiển thị mã máy cho gọn, nếu muốn dễ chọn hơn thì có thể thêm tên trại phía sau.
-    opt.textContent = maMay;
-
-    opt.dataset.tenTrai = getTenTrai(m);
-    opt.dataset.donVi = getDonVi(m);
-    opt.dataset.khuVuc = getKhuVuc(m);
-    opt.dataset.tinhTP = getTinhTP(m);
-
-    select.appendChild(opt);
-  });
-
-  if (keepValue && oldValue) {
-    select.value = oldValue;
-  }
-
+  if (keepValue && oldValue) select.value = oldValue;
   onMayChange();
 }
 
@@ -600,19 +499,10 @@ function fillHienTuongSelect(keepValue) {
   if (!select) return;
 
   const oldValue = keepValue ? select.value : '';
-
   select.innerHTML = '<option value="">-- Chọn hiện tượng --</option>';
 
   const list = APP.hienTuong
-    .map(x => getObjValue(x, [
-      'Hiện Tượng/Sự cố',
-      'Hiện tượng/Sự cố',
-      'Hiện tượng/sự cố',
-      'Hiện tượng',
-      'Hien tuong',
-      'Sự cố',
-      'Lỗi'
-    ]))
+    .map(x => getObjValue(x, ['Hiện Tượng/Sự cố', 'Hiện tượng/Sự cố', 'Hiện tượng/sự cố', 'Hiện tượng', 'Hien tuong', 'Sự cố', 'Lỗi']))
     .filter(Boolean);
 
   uniqueArray(list).forEach(name => {
@@ -630,7 +520,6 @@ function fillSelect(id, values, placeholder, keepValue) {
   if (!select) return;
 
   const oldValue = keepValue ? select.value : '';
-
   select.innerHTML = '';
 
   const emptyOpt = document.createElement('option');
@@ -645,16 +534,12 @@ function fillSelect(id, values, placeholder, keepValue) {
     select.appendChild(opt);
   });
 
-  if (keepValue && oldValue) {
-    select.value = oldValue;
-  }
+  if (keepValue && oldValue) select.value = oldValue;
 }
 
 function onDoiTruongChange() {
   const doiTruong = getValue('doiTruong');
-
   SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== doiTruong);
-
   renderMemberDropdown();
   renderMemberText();
 }
@@ -662,7 +547,6 @@ function onDoiTruongChange() {
 function toggleMemberDropdown() {
   const dropdown = document.getElementById('thanhVienDropdown');
   if (!dropdown) return;
-
   dropdown.classList.toggle('hidden');
   renderMemberDropdown();
 }
@@ -682,13 +566,7 @@ function renderMemberDropdown() {
 
   dropdown.innerHTML = names.map(name => {
     const checked = SELECTED_MEMBERS.includes(name) ? 'checked' : '';
-
-    return `
-      <label class="multi-option">
-        <input type="checkbox" ${checked} onchange="toggleMember('${escapeJs(name)}', this.checked)">
-        <span>${escapeHtml(name)}</span>
-      </label>
-    `;
+    return `<label class="multi-option"><input type="checkbox" ${checked} onchange="toggleMember('${escapeJs(name)}', this.checked)"><span>${escapeHtml(name)}</span></label>`;
   }).join('');
 
   renderMemberText();
@@ -700,22 +578,14 @@ function toggleMember(name, checked) {
   } else {
     SELECTED_MEMBERS = SELECTED_MEMBERS.filter(x => x !== name);
   }
-
   renderMemberText();
 }
 
 function renderMemberText() {
   const text = document.getElementById('thanhVienText');
   if (!text) return;
-
-  if (!SELECTED_MEMBERS.length) {
-    text.textContent = 'Chọn thành viên';
-    return;
-  }
-
-  text.textContent = SELECTED_MEMBERS.join('; ');
+  text.textContent = SELECTED_MEMBERS.length ? SELECTED_MEMBERS.join('; ') : 'Chọn thành viên';
 }
-
 
 /****************************************************
  * MACHINE INFO
@@ -740,83 +610,34 @@ function onMayChange() {
 }
 
 function getMayCode(obj) {
-  return String(getObjValue(obj, [
-    'Mã Máy',
-    'Mã máy',
-    'Ma May',
-    'Ma may',
-    'Mã hệ thống',
-    'Mã máy phát',
-    'Code',
-    'Mã'
-  ]) || '').trim();
+  return String(getObjValue(obj, ['Mã Máy', 'Mã máy', 'Ma May', 'Ma may', 'Mã hệ thống', 'Mã máy phát', 'Code', 'Mã']) || '').trim();
 }
 
 function findMayByCode(maMay) {
   const codeNorm = normText(maMay);
-
   if (!codeNorm) return null;
-
-  return APP.may.find(row => {
-    return normText(getMayCode(row)) === codeNorm;
-  }) || null;
+  return APP.may.find(row => normText(getMayCode(row)) === codeNorm) || null;
 }
 
 function getCurrentMachine() {
-  const maMay = getValue('maMay');
-  return findMayByCode(maMay);
+  return findMayByCode(getValue('maMay'));
 }
 
 function getTenTrai(may) {
-  return String(getObjValue(may, [
-    'Tên Trang Trại / Đơn Vị',
-    'Tên trang trại / đơn vị',
-    'Ten Trang Trai / Don Vi',
-    'Tên Trang Trại',
-    'Tên trang trại',
-    'Tên trại',
-    'Ten trai',
-    'Trang trại',
-    'Trang trai',
-    'Địa chỉ trại'
-  ]) || '').trim();
+  return String(getObjValue(may, ['Tên Trang Trại / Đơn Vị', 'Tên trang trại / đơn vị', 'Ten Trang Trai / Don Vi', 'Tên Trang Trại', 'Tên trang trại', 'Tên trại', 'Ten trai', 'Trang trại', 'Trang trai', 'Địa chỉ trại']) || '').trim();
 }
 
 function getDonVi(may) {
-  return String(getObjValue(may, [
-    'Đơn vị hợp tác',
-    'Đơn Vị Hợp Tác',
-    'Don vi hop tac',
-    'Đơn vị',
-    'Đơn Vị',
-    'Don vi'
-  ]) || '').trim();
+  return String(getObjValue(may, ['Đơn vị hợp tác', 'Đơn Vị Hợp Tác', 'Don vi hop tac', 'Đơn vị', 'Đơn Vị', 'Don vi']) || '').trim();
 }
 
 function getKhuVuc(may) {
-  return String(getObjValue(may, [
-    'Khu Vực',
-    'Khu vực',
-    'Khu Vuc',
-    'Khu vuc'
-  ]) || '').trim();
+  return String(getObjValue(may, ['Khu Vực', 'Khu vực', 'Khu Vuc', 'Khu vuc']) || '').trim();
 }
 
 function getTinhTP(may) {
-  return String(getObjValue(may, [
-    'Tỉnh Thành',
-    'Tỉnh thành',
-    'Tinh Thanh',
-    'Tỉnh/TP',
-    'Tinh/TP',
-    'Tỉnh / TP',
-    'Tỉnh',
-    'Tinh',
-    'Thành phố',
-    'Thanh pho'
-  ]) || '').trim();
+  return String(getObjValue(may, ['Tỉnh Thành', 'Tỉnh thành', 'Tinh Thanh', 'Tỉnh/TP', 'Tinh/TP', 'Tỉnh / TP', 'Tỉnh', 'Tinh', 'Thành phố', 'Thanh pho']) || '').trim();
 }
-
 
 /****************************************************
  * PURPOSE / DATE
@@ -824,7 +645,6 @@ function getTinhTP(may) {
 
 function onMucDichChange() {
   const mucDich = getRadioValue('mucDich');
-
   const boxHienTuong = document.getElementById('boxHienTuong');
   const boxCuThe = document.getElementById('boxCuThe');
 
@@ -840,10 +660,8 @@ function onMucDichChange() {
 }
 
 function setDefaultDateTime() {
-  const now = new Date();
-  setValue('ngayGioXuatKho', toDatetimeLocalValue(now));
+  setValue('ngayGioXuatKho', toDatetimeLocalValue(new Date()));
 }
-
 
 /****************************************************
  * MATERIALS
@@ -852,9 +670,7 @@ function setDefaultDateTime() {
 function resetSelectedMaterials() {
   APP.selected = [];
 
-  const fixed = getFixedMaterials();
-
-  fixed.forEach(item => {
+  getFixedMaterials().forEach(item => {
     addOrUpdateSelected({
       id: makeMaterialId(item),
       nguonVatTu: 'Cố định',
@@ -885,57 +701,29 @@ function getSelectableMaterials() {
   }
 
   const hienTuong = getValue('hienTuong');
-
-  if (!hienTuong) {
-    return [];
-  }
+  if (!hienTuong) return [];
 
   const relatedCums = getRelatedCumsByHienTuong(hienTuong);
-
-  if (!relatedCums.length) {
-    return [];
-  }
+  if (!relatedCums.length) return [];
 
   const relatedNorms = relatedCums.map(normText);
 
   return APP.vatTu.filter(item => {
     const tenVatTu = getTenVatTu(item);
-    if (!tenVatTu) return false;
-
     const cumVatTu = getCumLinhKien(item);
-    if (!cumVatTu) return false;
-
-    return relatedNorms.includes(normText(cumVatTu));
+    return tenVatTu && cumVatTu && relatedNorms.includes(normText(cumVatTu));
   });
 }
 
 function getRelatedCumsByHienTuong(hienTuong) {
   const htNorm = normText(hienTuong);
-
   const cums = [];
 
   APP.hienTuong.forEach(row => {
-    const tenHienTuong = getObjValue(row, [
-      'Hiện Tượng/Sự cố',
-      'Hiện tượng/Sự cố',
-      'Hiện tượng/sự cố',
-      'Hien Tuong/Su co',
-      'Hien tuong/Su co',
-      'Hiện tượng',
-      'Sự cố'
-    ]);
-
+    const tenHienTuong = getObjValue(row, ['Hiện Tượng/Sự cố', 'Hiện tượng/Sự cố', 'Hiện tượng/sự cố', 'Hien Tuong/Su co', 'Hien tuong/Su co', 'Hiện tượng', 'Sự cố']);
     if (normText(tenHienTuong) !== htNorm) return;
 
-    const cumLienQuan = getObjValue(row, [
-      'Cụm Linh Kiện Liên Quan',
-      'Cụm linh kiện liên quan',
-      'Cum Linh Kien Lien Quan',
-      'Cum linh kien lien quan',
-      'Cụm Linh Kiện',
-      'Cụm linh kiện'
-    ]);
-
+    const cumLienQuan = getObjValue(row, ['Cụm Linh Kiện Liên Quan', 'Cụm linh kiện liên quan', 'Cum Linh Kien Lien Quan', 'Cum linh kien lien quan', 'Cụm Linh Kiện', 'Cụm linh kiện']);
     if (!cumLienQuan) return;
 
     String(cumLienQuan)
@@ -953,14 +741,10 @@ function renderVatTuSearch() {
   if (!box) return;
 
   const keyword = normText(getValue('searchVatTu'));
-  let list = getSelectableMaterials();
-
   const selectedIds = new Set(APP.selected.map(x => x.id));
-
-  list = list.filter(item => {
+  let list = getSelectableMaterials().filter(item => {
     const id = makeMaterialId(item);
     if (selectedIds.has(id)) return false;
-
     if (!keyword) return true;
 
     const haystack = normText([
@@ -975,7 +759,6 @@ function renderVatTuSearch() {
 
   if (!list.length) {
     box.classList.remove('hidden');
-
     const mucDich = getRadioValue('mucDich');
     const hienTuong = getValue('hienTuong');
 
@@ -986,14 +769,11 @@ function renderVatTuSearch() {
     } else {
       box.innerHTML = '<div class="suggest-row suggest-empty">Không có vật tư phù hợp để chọn thêm.</div>';
     }
-
     return;
   }
 
   const groups = groupBy(list, item => getCumLinhKien(item) || 'Khác');
-
   box.classList.remove('hidden');
-
   box.innerHTML = Object.keys(groups).sort().map(groupName => {
     const rows = groups[groupName].map(item => {
       const id = makeMaterialId(item);
@@ -1015,25 +795,17 @@ function renderVatTuSearch() {
             <option value="Tốt">Tốt</option>
             <option value="K.xđ">K.xđ</option>
           </select>
-        </div>
-      `;
+        </div>`;
     }).join('');
 
-    return `
-      <div class="suggest-group">
-        <div class="suggest-group-title">${escapeHtml(groupName)}</div>
-        ${rows}
-      </div>
-    `;
+    return `<div class="suggest-group"><div class="suggest-group-title">${escapeHtml(groupName)}</div>${rows}</div>`;
   }).join('');
 }
 
 function selectMaterialFromSearch(id, checked) {
   if (!checked) return;
 
-  const sourceItem = APP.vatTu.find(x => makeMaterialId(x) === id)
-    || APP.vatTuCoDinh.find(x => makeMaterialId(x) === id);
-
+  const sourceItem = APP.vatTu.find(x => makeMaterialId(x) === id) || APP.vatTuCoDinh.find(x => makeMaterialId(x) === id);
   if (!sourceItem) return;
 
   const qtyEl = document.getElementById('qty_search_' + cssId(id));
@@ -1058,43 +830,30 @@ function selectMaterialFromSearch(id, checked) {
 
 function addOrUpdateSelected(item) {
   const idx = APP.selected.findIndex(x => x.id === item.id);
-
-  if (idx >= 0) {
-    APP.selected[idx] = {
-      ...APP.selected[idx],
-      ...item
-    };
-  } else {
-    APP.selected.push(item);
-  }
+  if (idx >= 0) APP.selected[idx] = { ...APP.selected[idx], ...item };
+  else APP.selected.push(item);
 }
 
 function removeSelectedMaterial(id) {
   const item = APP.selected.find(x => x.id === id);
-
   if (item && item.fixed) {
     alert('Vật tư cố định không nên bỏ chọn. Nếu vẫn không cần mang đi, có thể sửa số lượng về 0.');
     return;
   }
 
   APP.selected = APP.selected.filter(x => x.id !== id);
-
   renderVatTuSearch();
   renderSelectedItems();
 }
 
 function updateSelectedQty(id, value) {
   const item = APP.selected.find(x => x.id === id);
-  if (!item) return;
-
-  item.soLuongCan = normalizeQty(value);
+  if (item) item.soLuongCan = normalizeQty(value);
 }
 
 function updateSelectedStatus(id, value) {
   const item = APP.selected.find(x => x.id === id);
-  if (!item) return;
-
-  item.tinhTrangXuatKho = value;
+  if (item) item.tinhTrangXuatKho = value;
 }
 
 function renderSelectedItems() {
@@ -1115,23 +874,11 @@ function renderSelectedItems() {
     return `
       <div class="item-row">
         <input type="checkbox" checked onchange="removeSelectedMaterial('${escapeJs(id)}')">
-        <div>
-          <b>${escapeHtml(item.tenVatTu)}</b><br>
-          <small>${escapeHtml(item.cumLinhKien || '')}${item.nguonVatTu ? ' - ' + escapeHtml(item.nguonVatTu) : ''}</small>
-        </div>
-        <input
-          type="number"
-          min="0"
-          step="1"
-          value="${escapeHtml(item.soLuongCan)}"
-          onchange="updateSelectedQty('${escapeJs(id)}', this.value)"
-        >
-        <select onchange="updateSelectedStatus('${escapeJs(id)}', this.value)">
-          ${statusOptions(item.tinhTrangXuatKho)}
-        </select>
+        <div><b>${escapeHtml(item.tenVatTu)}</b><br><small>${escapeHtml(item.cumLinhKien || '')}${item.nguonVatTu ? ' - ' + escapeHtml(item.nguonVatTu) : ''}</small></div>
+        <input type="number" min="0" step="1" value="${escapeHtml(item.soLuongCan)}" onchange="updateSelectedQty('${escapeJs(id)}', this.value)">
+        <select onchange="updateSelectedStatus('${escapeJs(id)}', this.value)">${statusOptions(item.tinhTrangXuatKho)}</select>
         <div>${removeBtn}</div>
-      </div>
-    `;
+      </div>`;
   }).join('');
 }
 
@@ -1141,33 +888,19 @@ function statusOptions(current) {
 }
 
 function getTenVatTu(item) {
-  return String(getObjValue(item, [
-    'Tên Chi Tiết / Linh Kiện Thay Thế',
-    'Tên chi tiết / linh kiện thay thế',
-    'Ten Chi Tiet / Linh Kien Thay The',
-    'Ten chi tiet / linh kien thay the',
-    'Tên vật tư',
-    'Ten vat tu'
-  ]) || '').trim();
+  return String(getObjValue(item, ['Tên Chi Tiết / Linh Kiện Thay Thế', 'Tên chi tiết / linh kiện thay thế', 'Ten Chi Tiet / Linh Kien Thay The', 'Ten chi tiet / linh kien thay the', 'Tên vật tư', 'Ten vat tu']) || '').trim();
 }
 
 function getCumLinhKien(item) {
-  return String(getObjValue(item, [
-    'Cụm Linh Kiện',
-    'Cụm linh kiện',
-    'Cum Linh Kien',
-    'Cum linh kien'
-  ]) || '').trim();
+  return String(getObjValue(item, ['Cụm Linh Kiện', 'Cụm linh kiện', 'Cum Linh Kien', 'Cum linh kien']) || '').trim();
 }
 
 function makeMaterialId(item) {
   const ten = getTenVatTu(item);
   const cum = getCumLinhKien(item);
   const ma = getObjValue(item, ['Mã vật tư', 'Ma vat tu', 'Mã Vật Tư']) || '';
-
   return normText(cum + '|' + ten + '|' + ma);
 }
-
 
 /****************************************************
  * FORM PAYLOAD
@@ -1175,40 +908,25 @@ function makeMaterialId(item) {
 
 function collectFormPayload() {
   const mucDich = getRadioValue('mucDich');
-
-  let cuThe = '';
-
-  if (mucDich === 'Bảo dưỡng sửa chữa') {
-    cuThe = getValue('hienTuong');
-  } else {
-    cuThe = getValue('cuTheNhapTay').trim();
-  }
-
+  const cuThe = mucDich === 'Bảo dưỡng sửa chữa' ? getValue('hienTuong') : getValue('cuTheNhapTay').trim();
   const maMay = getValue('maMay');
   const may = findMayByCode(maMay);
 
   return {
     doiTruong: getValue('doiTruong'),
     thanhVien: SELECTED_MEMBERS.slice(),
-
-    maMay: maMay,
-
-    // Đọc đúng theo sheet 2:
-    // Mã Máy, Đơn vị hợp tác, Tên Trang Trại / Đơn Vị, Khu Vực, Tỉnh Thành
+    maMay,
     tenTrai: may ? getTenTrai(may) : getText('tenTrai'),
     donVi: may ? getDonVi(may) : getText('donVi'),
     khuVuc: may ? getKhuVuc(may) : getText('khuVuc'),
     tinhTP: may ? getTinhTP(may) : getText('tinhTP'),
-
     ngayGioXuatKho: formatDateTimeForPayload(getValue('ngayGioXuatKho')),
     nguoiXuatKho: getValue('nguoiXuatKho'),
     ngayGioNhapKho: formatDateTimeForPayload(getValue('ngayGioNhapKho')),
     nguoiNhapKho: getValue('nguoiNhapKho'),
-
     mucDich,
     cuThe,
     ghiChu: '',
-
     items: APP.selected.map((x, idx) => ({
       stt: idx + 1,
       nguonVatTu: x.nguonVatTu || '',
@@ -1236,13 +954,12 @@ function validatePayloadClient(payload) {
   if (!payload.cuThe) return 'Vui lòng nhập/chọn nội dung cụ thể.';
   if (!payload.items || !payload.items.length) return 'Vui lòng chọn vật tư.';
 
-  if (payload.thanhVien.includes(payload.doiTruong)) {
+  if (Array.isArray(payload.thanhVien) && payload.thanhVien.includes(payload.doiTruong)) {
     return 'Thành viên không được trùng với đội trưởng.';
   }
 
   return '';
 }
-
 
 /****************************************************
  * SAVE / PREVIEW / EDIT
@@ -1251,20 +968,11 @@ function validatePayloadClient(payload) {
 async function previewCurrentForm() {
   const payload = collectFormPayload();
   const err = validatePayloadClient(payload);
-
-  if (err) {
-    alert(err);
-    return;
-  }
+  if (err) return alert(err);
 
   setBusy(true, 'Đang tạo xem trước...');
-
   try {
-    const html = await api('previewDraft', {
-      token: TOKEN,
-      payload
-    });
-
+    const html = await api('previewDraft', { token: TOKEN, payload });
     openPreviewHtml(html);
   } catch (err) {
     alert(err.message);
@@ -1276,38 +984,18 @@ async function previewCurrentForm() {
 async function save() {
   const payload = collectFormPayload();
   const err = validatePayloadClient(payload);
-
-  if (err) {
-    alert(err);
-    return;
-  }
+  if (err) return alert(err);
 
   setBusy(true, EDITING_MA_PHIEU ? 'Đang cập nhật phiếu...' : 'Đang lưu phiếu...');
-
   try {
-    let res;
-
-    if (EDITING_MA_PHIEU) {
-      res = await api('updatePhieu', {
-        token: TOKEN,
-        maPhieu: EDITING_MA_PHIEU,
-        payload
-      });
-    } else {
-      res = await api('savePhieu', {
-        token: TOKEN,
-        payload
-      });
-    }
+    const res = EDITING_MA_PHIEU
+      ? await api('updatePhieu', { token: TOKEN, maPhieu: EDITING_MA_PHIEU, payload })
+      : await api('savePhieu', { token: TOKEN, payload });
 
     alert((EDITING_MA_PHIEU ? 'Đã cập nhật phiếu: ' : 'Đã lưu phiếu: ') + res.maPhieu);
-
     resetForm();
     await loadPhieuList(false);
-
-    const historyBtn = [...document.querySelectorAll('.nav')]
-      .find(btn => (btn.textContent || '').includes('Phiếu đã tạo'));
-
+    const historyBtn = [...document.querySelectorAll('.nav')].find(btn => (btn.textContent || '').includes('Phiếu đã tạo'));
     showTab('historyTab', historyBtn);
   } catch (err) {
     alert(err.message);
@@ -1335,18 +1023,14 @@ function resetForm() {
 
   setValue('maMay', '');
   onMayChange();
-
   setDefaultDateTime();
-
   setValue('nguoiXuatKho', '');
   setValue('ngayGioNhapKho', '');
   setValue('nguoiNhapKho', '');
-
   setRadioValue('mucDich', 'Bảo dưỡng sửa chữa');
   setValue('hienTuong', '');
   setValue('cuTheNhapTay', '');
   setValue('searchVatTu', '');
-
   onMucDichChange();
   resetSelectedMaterials();
 }
@@ -1357,18 +1041,10 @@ function cancelEdit() {
 
 async function editPhieu(maPhieu) {
   setBusy(true, 'Đang tải phiếu để sửa...');
-
   try {
-    const data = await api('getPhieuDetail', {
-      token: TOKEN,
-      maPhieu
-    });
-
+    const data = await api('getPhieuDetail', { token: TOKEN, maPhieu });
     fillFormFromPhieu(data.phieu, data.items);
-
-    const formBtn = [...document.querySelectorAll('.nav')]
-      .find(btn => (btn.textContent || '').includes('Tạo phiếu'));
-
+    const formBtn = [...document.querySelectorAll('.nav')].find(btn => (btn.textContent || '').includes('Tạo phiếu'));
     showTab('formTab', formBtn);
   } catch (err) {
     alert(err.message);
@@ -1390,18 +1066,12 @@ function fillFormFromPhieu(phieu, items) {
   if (cancelBtn) cancelBtn.classList.remove('hidden');
 
   setValue('doiTruong', phieu.doiTruong || '');
-
-  SELECTED_MEMBERS = String(phieu.thanhVien || '')
-    .split(';')
-    .map(x => x.trim())
-    .filter(Boolean);
-
+  SELECTED_MEMBERS = String(phieu.thanhVien || '').split(';').map(x => x.trim()).filter(Boolean);
   renderMemberDropdown();
   renderMemberText();
 
   setValue('maMay', phieu.maMay || '');
   onMayChange();
-
   setValue('ngayGioXuatKho', parseDateTimeToInput(phieu.ngayGioXuatKho));
   setValue('nguoiXuatKho', phieu.nguoiXuatKho || '');
   setValue('ngayGioNhapKho', parseDateTimeToInput(phieu.ngayGioNhapKho));
@@ -1410,18 +1080,11 @@ function fillFormFromPhieu(phieu, items) {
   setRadioValue('mucDich', phieu.mucDich || 'Bảo dưỡng sửa chữa');
   onMucDichChange();
 
-  if ((phieu.mucDich || '') === 'Bảo dưỡng sửa chữa') {
-    setValue('hienTuong', phieu.cuThe || '');
-  } else {
-    setValue('cuTheNhapTay', phieu.cuThe || '');
-  }
+  if ((phieu.mucDich || '') === 'Bảo dưỡng sửa chữa') setValue('hienTuong', phieu.cuThe || '');
+  else setValue('cuTheNhapTay', phieu.cuThe || '');
 
   APP.selected = (items || []).map(x => ({
-    id: makeMaterialId({
-      'Cụm Linh Kiện': x.cumLinhKien,
-      'Tên Chi Tiết / Linh Kiện Thay Thế': x.tenVatTu,
-      'Mã vật tư': x.maVatTu
-    }),
+    id: makeMaterialId({ 'Cụm Linh Kiện': x.cumLinhKien, 'Tên Chi Tiết / Linh Kiện Thay Thế': x.tenVatTu, 'Mã vật tư': x.maVatTu }),
     nguonVatTu: x.nguonVatTu || '',
     cumLinhKien: x.cumLinhKien || '',
     tenVatTu: x.tenVatTu || '',
@@ -1434,11 +1097,9 @@ function fillFormFromPhieu(phieu, items) {
   }));
 
   setValue('searchVatTu', '');
-
   renderVatTuSearch();
   renderSelectedItems();
 }
-
 
 /****************************************************
  * HISTORY / EXPORT / DELETE
@@ -1449,10 +1110,7 @@ async function loadPhieuList(silent) {
 
   const box = document.getElementById('phieuList');
   if (!box) return;
-
-  if (!silent) {
-    box.innerHTML = '<i>Đang tải danh sách phiếu...</i>';
-  }
+  if (!silent) box.innerHTML = '<i>Đang tải danh sách phiếu...</i>';
 
   try {
     const list = await api('listPhieu', { token: TOKEN });
@@ -1476,16 +1134,7 @@ function renderPhieuList(list) {
       <table class="data-table">
         <thead>
           <tr>
-            <th>Mã phiếu</th>
-            <th>Ngày tạo</th>
-            <th>Mã máy</th>
-            <th>Tên trại</th>
-            <th>Đội trưởng</th>
-            <th>Thành viên</th>
-            <th>Mục đích</th>
-            <th>Cụ thể</th>
-            <th>Trạng thái</th>
-            <th>Thao tác</th>
+            <th>Mã phiếu</th><th>Ngày tạo</th><th>Mã máy</th><th>Tên trại</th><th>Đội trưởng</th><th>Thành viên</th><th>Mục đích</th><th>Cụ thể</th><th>Trạng thái</th><th>Thao tác</th>
           </tr>
         </thead>
         <tbody>
@@ -1507,23 +1156,16 @@ function renderPhieuList(list) {
                 <button type="button" class="small-btn secondary" onclick="editPhieu('${escapeJs(p.maPhieu)}')">Sửa</button>
                 <button type="button" class="small-btn danger" onclick="deletePhieuUI('${escapeJs(p.maPhieu)}')">Xóa</button>
               </td>
-            </tr>
-          `).join('')}
+            </tr>`).join('')}
         </tbody>
       </table>
-    </div>
-  `;
+    </div>`;
 }
 
 async function previewSavedPhieu(maPhieu) {
   setBusy(true, 'Đang mở xem trước...');
-
   try {
-    const html = await api('previewPhieu', {
-      token: TOKEN,
-      maPhieu
-    });
-
+    const html = await api('previewPhieu', { token: TOKEN, maPhieu });
     openPreviewHtml(html);
   } catch (err) {
     alert(err.message);
@@ -1534,13 +1176,8 @@ async function previewSavedPhieu(maPhieu) {
 
 async function exportPdf(maPhieu) {
   setBusy(true, 'Đang xuất PDF...');
-
   try {
-    const url = await api('exportPhieuPdf', {
-      token: TOKEN,
-      maPhieu
-    });
-
+    const url = await api('exportPhieuPdf', { token: TOKEN, maPhieu });
     window.open(url, '_blank');
     await loadPhieuList(true);
   } catch (err) {
@@ -1552,13 +1189,8 @@ async function exportPdf(maPhieu) {
 
 async function exportWord(maPhieu) {
   setBusy(true, 'Đang xuất Word...');
-
   try {
-    const url = await api('exportPhieuWord', {
-      token: TOKEN,
-      maPhieu
-    });
-
+    const url = await api('exportPhieuWord', { token: TOKEN, maPhieu });
     window.open(url, '_blank');
     await loadPhieuList(true);
   } catch (err) {
@@ -1571,27 +1203,14 @@ async function exportWord(maPhieu) {
 async function deletePhieuUI(maPhieu) {
   if (!maPhieu) return;
 
-  const ok = confirm(
-    'Bạn chắc chắn muốn xóa phiếu ' + maPhieu + '?\n\n' +
-    'Thao tác này sẽ xóa dữ liệu ở sheet 10, sheet 11 và chuyển file PDF/Word vào thùng rác nếu có.'
-  );
-
+  const ok = confirm('Bạn chắc chắn muốn xóa phiếu ' + maPhieu + '?\n\nThao tác này sẽ xóa dữ liệu ở sheet 10, sheet 11 và chuyển file PDF/Word vào thùng rác nếu có.');
   if (!ok) return;
 
   setBusy(true, 'Đang xóa phiếu...');
-
   try {
-    await api('deletePhieu', {
-      token: TOKEN,
-      maPhieu
-    });
-
+    await api('deletePhieu', { token: TOKEN, maPhieu });
     alert('Đã xóa phiếu: ' + maPhieu);
-
-    if (EDITING_MA_PHIEU === maPhieu) {
-      resetForm();
-    }
-
+    if (EDITING_MA_PHIEU === maPhieu) resetForm();
     await loadPhieuList(false);
   } catch (err) {
     alert(err.message);
@@ -1600,7 +1219,6 @@ async function deletePhieuUI(maPhieu) {
   }
 }
 
-
 /****************************************************
  * PREVIEW MODAL
  ****************************************************/
@@ -1608,11 +1226,9 @@ async function deletePhieuUI(maPhieu) {
 function openPreviewHtml(html) {
   const modal = document.getElementById('previewModal');
   const frame = document.getElementById('previewFrame');
-
   if (!modal || !frame) return;
 
   modal.classList.remove('hidden');
-
   const doc = frame.contentWindow.document;
   doc.open();
   doc.write(html);
@@ -1622,7 +1238,6 @@ function openPreviewHtml(html) {
 function closePreview() {
   const modal = document.getElementById('previewModal');
   const frame = document.getElementById('previewFrame');
-
   if (modal) modal.classList.add('hidden');
 
   if (frame) {
@@ -1635,7 +1250,6 @@ function closePreview() {
   }
 }
 
-
 /****************************************************
  * ACCOUNT ADMIN
  ****************************************************/
@@ -1645,10 +1259,7 @@ async function loadAccounts(silent) {
 
   const box = document.getElementById('accountList');
   if (!box) return;
-
-  if (!silent) {
-    box.innerHTML = '<i>Đang tải danh sách tài khoản...</i>';
-  }
+  if (!silent) box.innerHTML = '<i>Đang tải danh sách tài khoản...</i>';
 
   try {
     const list = await api('listAccounts', { token: TOKEN });
@@ -1670,33 +1281,20 @@ function renderAccounts(list) {
 
   box.innerHTML = list.map(acc => {
     const status = String(acc.status || '').toLowerCase();
-
     return `
       <div class="account-row ${escapeHtml(status)}">
-        <div>
-          <b>${escapeHtml(acc.username)}</b><br>
-          <small>${escapeHtml(acc.createdAt || '')}</small>
-        </div>
-
+        <div><b>${escapeHtml(acc.username)}</b><br><small>${escapeHtml(acc.createdAt || '')}</small></div>
         <div>${escapeHtml(acc.fullName)}</div>
-
         <div>${escapeHtml(acc.role)}</div>
-
         <div>${renderStatusBadge(status)}</div>
-
         <div>
           <button type="button" class="small-btn" onclick="editAccountUI(${Number(acc.rowNumber)})">Sửa</button>
-          ${status === 'pending'
-            ? `<button type="button" class="small-btn" onclick="setAccountStatusUI(${Number(acc.rowNumber)}, 'active')">Duyệt</button>`
-            : ''
-          }
+          ${status === 'pending' ? `<button type="button" class="small-btn" onclick="setAccountStatusUI(${Number(acc.rowNumber)}, 'active')">Duyệt</button>` : ''}
           ${status === 'active'
             ? `<button type="button" class="small-btn danger" onclick="setAccountStatusUI(${Number(acc.rowNumber)}, 'locked')">Khóa</button>`
-            : `<button type="button" class="small-btn" onclick="setAccountStatusUI(${Number(acc.rowNumber)}, 'active')">Mở</button>`
-          }
+            : `<button type="button" class="small-btn" onclick="setAccountStatusUI(${Number(acc.rowNumber)}, 'active')">Mở</button>`}
         </div>
-      </div>
-    `;
+      </div>`;
   }).join('');
 }
 
@@ -1704,7 +1302,6 @@ function renderStatusBadge(status) {
   if (status === 'active') return '<span class="badge badge-active">active</span>';
   if (status === 'pending') return '<span class="badge badge-pending">pending</span>';
   if (status === 'locked') return '<span class="badge badge-locked">locked</span>';
-
   return '<span class="badge">' + escapeHtml(status) + '</span>';
 }
 
@@ -1732,10 +1329,7 @@ function clearAccountForm() {
 }
 
 async function saveAccountUI() {
-  if (!CURRENT_USER || CURRENT_USER.role !== 'admin') {
-    alert('Bạn không có quyền admin.');
-    return;
-  }
+  if (!CURRENT_USER || CURRENT_USER.role !== 'admin') return alert('Bạn không có quyền admin.');
 
   const account = {
     rowNumber: getValue('accRow'),
@@ -1751,13 +1345,8 @@ async function saveAccountUI() {
   if (!account.fullName) return alert('Thiếu họ và tên.');
 
   setBusy(true, 'Đang lưu tài khoản...');
-
   try {
-    await api('saveAccount', {
-      token: TOKEN,
-      account
-    });
-
+    await api('saveAccount', { token: TOKEN, account });
     clearAccountForm();
     await loadAccounts(false);
     alert('Đã lưu tài khoản.');
@@ -1770,14 +1359,8 @@ async function saveAccountUI() {
 
 async function setAccountStatusUI(rowNumber, status) {
   setBusy(true, 'Đang cập nhật trạng thái tài khoản...');
-
   try {
-    await api('setAccountStatus', {
-      token: TOKEN,
-      rowNumber,
-      status
-    });
-
+    await api('setAccountStatus', { token: TOKEN, rowNumber, status });
     await loadAccounts(false);
   } catch (err) {
     alert(err.message);
@@ -1786,7 +1369,6 @@ async function setAccountStatusUI(rowNumber, status) {
   }
 }
 
-
 /****************************************************
  * BUSY
  ****************************************************/
@@ -1794,25 +1376,22 @@ async function setAccountStatusUI(rowNumber, status) {
 function setBusy(isBusy, message) {
   IS_BUSY = isBusy;
 
-  const buttons = document.querySelectorAll('button');
-  buttons.forEach(btn => {
+  document.querySelectorAll('button').forEach(btn => {
     if (btn.classList.contains('nav')) return;
     btn.disabled = isBusy;
   });
 
   const saveBtn = document.getElementById('saveBtn');
+  if (!saveBtn) return;
 
-  if (saveBtn) {
-    if (isBusy) {
-      saveBtn.dataset.oldText = saveBtn.textContent;
-      saveBtn.textContent = message || 'Đang xử lý...';
-    } else if (saveBtn.dataset.oldText) {
-      saveBtn.textContent = saveBtn.dataset.oldText;
-      delete saveBtn.dataset.oldText;
-    }
+  if (isBusy) {
+    saveBtn.dataset.oldText = saveBtn.textContent;
+    saveBtn.textContent = message || 'Đang xử lý...';
+  } else if (saveBtn.dataset.oldText) {
+    saveBtn.textContent = saveBtn.dataset.oldText;
+    delete saveBtn.dataset.oldText;
   }
 }
-
 
 /****************************************************
  * UTILS DOM
@@ -1844,9 +1423,7 @@ function getRadioValue(name) {
 }
 
 function setRadioValue(name, value) {
-  const list = document.querySelectorAll('input[name="' + name + '"]');
-
-  list.forEach(x => {
+  document.querySelectorAll('input[name="' + name + '"]').forEach(x => {
     x.checked = x.value === value;
   });
 }
@@ -1855,11 +1432,8 @@ function getObjValue(obj, keys) {
   if (!obj) return '';
 
   const normKeys = keys.map(normText);
-
   for (const k in obj) {
-    if (normKeys.includes(normText(k))) {
-      return obj[k];
-    }
+    if (normKeys.includes(normText(k))) return obj[k];
   }
 
   return '';
@@ -1877,13 +1451,7 @@ function normText(s) {
 
 function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, function (m) {
-    return {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#039;'
-    }[m];
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
   });
 }
 
@@ -1930,33 +1498,28 @@ function parseDateTimeToInput(value) {
 
   const s = String(value).trim();
 
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) {
-    return s.slice(0, 16);
-  }
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}`;
 
-  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
-  if (m) {
-    return `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`;
-  }
+  m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`;
 
   const d = new Date(s);
-  if (!isNaN(d.getTime())) {
-    return toDatetimeLocalValue(d);
-  }
+  if (!isNaN(d.getTime())) return toDatetimeLocalValue(d);
 
   return '';
 }
+
 function formatDateTimeForPayload(value) {
   if (!value) return '';
 
   const s = String(value).trim();
 
-  // Dạng từ input datetime-local: 2026-06-03T13:54
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-  if (m) {
-    return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
-  }
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
 
-  // Nếu đã là dạng đẹp rồi thì giữ nguyên
+  m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+  if (m) return `${m[1]}/${m[2]}/${m[3]} ${m[4]}:${m[5]}`;
+
   return s.replace('T', ' ');
 }
