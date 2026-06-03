@@ -5,7 +5,7 @@
  * Lưu ý: Dán URL Apps Script Web App vào API_URL sau khi copy file.
  ****************************************************/
 
-const API_URL = 'https://script.google.com/macros/s/AKfycbxvCSISV1WuGkEabski6gwtdJKy_BDK7BJNgAUBONmQxMlbbgaVaEXXlznApsJGzFin/exec'; // Dán URL Apps Script Web App vào đây
+const API_URL = 'https://script.google.com/macros/s/AKfycby6LHf6K2Ci0XD2p-EBMaFS1K_bB9Wg6Qhc7OVtspNW_OkgIOPlO3OyeIWxH_Pc_yIm/exec'; // Dán URL Apps Script Web App vào đây
 
 const STORAGE_KEY = 'EGREEN_PHIEU_VAT_TU_SESSION_V2';
 const AUTO_REFRESH_MS = 30000;
