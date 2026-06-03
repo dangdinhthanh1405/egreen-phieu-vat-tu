@@ -758,8 +758,11 @@ function renderHienTuongDropdown() {
   const dropdown = document.getElementById('hienTuongDropdown');
   if (!dropdown) return;
 
-  const rawKeyword = getValue('hienTuongSearch');
+  const oldInput = document.getElementById('hienTuongSearch');
+  const rawKeyword = oldInput ? oldInput.value : '';
   const keyword = normText(rawKeyword);
+  const wasFocused = oldInput && document.activeElement === oldInput;
+  const cursorPos = oldInput ? oldInput.selectionStart : rawKeyword.length;
 
   const list = HIENTUONG_CACHE.filter(name => {
     if (!keyword) return true;
@@ -776,40 +779,47 @@ function renderHienTuongDropdown() {
         autocomplete="off"
         oninput="renderHienTuongDropdown()"
         onclick="event.stopPropagation()"
+        onkeydown="event.stopPropagation()"
       >
     </div>
   `;
 
   if (!list.length) {
-    dropdown.innerHTML = searchBox + '<div class="multi-option">Không tìm thấy hiện tượng phù hợp.</div>';
-    return;
+    dropdown.innerHTML = searchBox + '<div class="search-popup-empty">Không tìm thấy hiện tượng phù hợp.</div>';
+  } else {
+    dropdown.innerHTML = searchBox + list.map(name => {
+      const selected = SELECTED_HIEN_TUONG.includes(name) ? 'selected' : '';
+
+      return `
+        <div
+          class="search-option member-option ${selected}"
+          onclick="toggleHienTuongByName('${escapeJs(name)}')"
+        >
+          <div class="search-option-title">${escapeHtml(name)}</div>
+        </div>
+      `;
+    }).join('');
   }
 
-  dropdown.innerHTML = searchBox + list.map(name => {
-    const checked = SELECTED_HIEN_TUONG.includes(name) ? 'checked' : '';
+  const newInput = document.getElementById('hienTuongSearch');
+  if (wasFocused && newInput) {
+    newInput.focus();
 
-    return `
-      <label class="multi-option">
-        <input
-          type="checkbox"
-          ${checked}
-          onchange="toggleHienTuong('${escapeJs(name)}', this.checked)"
-        >
-        <span>${escapeHtml(name)}</span>
-      </label>
-    `;
-  }).join('');
+    try {
+      const pos = Math.min(cursorPos, newInput.value.length);
+      newInput.setSelectionRange(pos, pos);
+    } catch (e) {}
+  }
 }
 
-function toggleHienTuong(name, checked) {
-  if (checked) {
-    if (!SELECTED_HIEN_TUONG.includes(name)) {
-      SELECTED_HIEN_TUONG.push(name);
-    }
-  } else {
+function toggleHienTuongByName(name) {
+  if (SELECTED_HIEN_TUONG.includes(name)) {
     SELECTED_HIEN_TUONG = SELECTED_HIEN_TUONG.filter(x => x !== name);
+  } else {
+    SELECTED_HIEN_TUONG.push(name);
   }
 
+  renderHienTuongDropdown();
   renderHienTuongText();
   renderVatTuSearch();
 }
