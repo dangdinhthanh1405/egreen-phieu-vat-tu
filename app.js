@@ -2,10 +2,9 @@
  * eGreen - Phiếu vật tư
  * Frontend app.js for GitHub Pages
  * Optimized version
- * Lưu ý: Dán URL Apps Script Web App vào API_URL sau khi copy file.
  ****************************************************/
 
-const API_URL = 'https://script.google.com/macros/s/AKfycby6LHf6K2Ci0XD2p-EBMaFS1K_bB9Wg6Qhc7OVtspNW_OkgIOPlO3OyeIWxH_Pc_yIm/exec'; // Dán URL Apps Script Web App vào đây
+const API_URL = 'https://script.google.com/macros/s/AKfycby6LHf6K2Ci0XD2p-EBMaFS1K_bB9Wg6Qhc7OVtspNW_OkgIOPlO3OyeIWxH_Pc_yIm/exec';
 
 const STORAGE_KEY = 'EGREEN_PHIEU_VAT_TU_SESSION_V2';
 const AUTO_REFRESH_MS = 30000;
@@ -50,11 +49,14 @@ function bindGlobalEvents() {
     if (multi && dropdown && !multi.contains(e.target)) {
       dropdown.classList.add('hidden');
     }
+
+    closeSearchPopupsOnOutsideClick(e);
   });
 
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
       closePreview();
+      closeAllSearchPopups();
       return;
     }
 
@@ -314,6 +316,8 @@ async function doLogout() {
   CURRENT_USER = null;
   ACCOUNT_CACHE = [];
   SELECTED_MEMBERS = [];
+  KTV_NAME_CACHE = [];
+  MACHINE_CACHE = [];
   EDITING_MA_PHIEU = '';
   clearSavedSession();
 
@@ -452,24 +456,22 @@ function showTab(tabId, btn) {
 }
 
 /****************************************************
- * SELECT DATA
+ * SELECT DATA - KTV POPUP
  ****************************************************/
 
 function fillKtvSelects(keepValue) {
   KTV_NAME_CACHE = getKtvNames();
 
-  fillNameInput('doiTruong', KTV_NAME_CACHE, keepValue);
-  fillNameInput('nguoiXuatKho', KTV_NAME_CACHE, keepValue);
-  fillNameInput('nguoiNhapKho', KTV_NAME_CACHE, keepValue);
+  fillNamePopupInput('doiTruong', KTV_NAME_CACHE, keepValue);
+  fillNamePopupInput('nguoiXuatKho', KTV_NAME_CACHE, keepValue);
+  fillNamePopupInput('nguoiNhapKho', KTV_NAME_CACHE, keepValue);
 
   renderMemberDropdown();
 }
 
-function fillNameInput(id, names, keepValue) {
+function fillNamePopupInput(id, names, keepValue) {
   const input = document.getElementById(id);
-  const list = document.getElementById(id + 'List');
-
-  if (!input || !list) return;
+  if (!input) return;
 
   const oldValue = keepValue ? input.value : '';
 
@@ -477,14 +479,33 @@ function fillNameInput(id, names, keepValue) {
     input.value = '';
   }
 
-  renderNameDatalist(id, names);
+  renderNamePopup(id, names);
 
   if (keepValue && oldValue) {
     input.value = oldValue;
   }
 }
 
-function filterNameInput(id) {
+function openNamePopup(id) {
+  const popup = document.getElementById(id + 'Popup');
+  if (!popup) return;
+
+  filterNamePopup(id);
+  popup.classList.remove('hidden');
+}
+
+function toggleNamePopup(id) {
+  const popup = document.getElementById(id + 'Popup');
+  if (!popup) return;
+
+  if (popup.classList.contains('hidden')) {
+    openNamePopup(id);
+  } else {
+    popup.classList.add('hidden');
+  }
+}
+
+function filterNamePopup(id) {
   const input = document.getElementById(id);
   if (!input) return;
 
@@ -495,16 +516,63 @@ function filterNameInput(id) {
     return normText(name).includes(keyword);
   });
 
-  renderNameDatalist(id, names);
+  renderNamePopup(id, names);
+
+  const popup = document.getElementById(id + 'Popup');
+  if (popup) popup.classList.remove('hidden');
 }
 
-function renderNameDatalist(id, names) {
-  const list = document.getElementById(id + 'List');
-  if (!list) return;
+function renderNamePopup(id, names) {
+  const popup = document.getElementById(id + 'Popup');
+  if (!popup) return;
 
-  list.innerHTML = names.map(name => {
-    return `<option value="${escapeHtml(name)}"></option>`;
+  if (!names.length) {
+    popup.innerHTML = '<div class="search-popup-empty">Không tìm thấy tên phù hợp.</div>';
+    return;
+  }
+
+  popup.innerHTML = names.map(name => {
+    return `
+      <button type="button" class="search-popup-item" onclick="selectNamePopup('${escapeJs(id)}', '${escapeJs(name)}')">
+        ${escapeHtml(name)}
+      </button>`;
   }).join('');
+}
+
+function selectNamePopup(id, name) {
+  setValue(id, name);
+
+  const popup = document.getElementById(id + 'Popup');
+  if (popup) popup.classList.add('hidden');
+
+  if (id === 'doiTruong') {
+    onDoiTruongChange();
+  }
+}
+
+function closeSearchPopupsOnOutsideClick(e) {
+  const popupBoxes = [
+    'doiTruongBox',
+    'nguoiXuatKhoBox',
+    'nguoiNhapKhoBox',
+    'maMayBox'
+  ];
+
+  popupBoxes.forEach(boxId => {
+    const box = document.getElementById(boxId);
+    if (!box) return;
+
+    if (!box.contains(e.target)) {
+      const popup = box.querySelector('.search-popup');
+      if (popup) popup.classList.add('hidden');
+    }
+  });
+}
+
+function closeAllSearchPopups() {
+  document.querySelectorAll('.search-popup').forEach(popup => {
+    popup.classList.add('hidden');
+  });
 }
 
 function getKtvNames() {
@@ -514,31 +582,129 @@ function getKtvNames() {
     .filter(Boolean));
 }
 
+/****************************************************
+ * MACHINE POPUP
+ ****************************************************/
+
 function fillMachineSelect(keepValue) {
-  const select = document.getElementById('maMay');
-  if (!select) return;
+  const input = document.getElementById('maMay');
+  if (!input) return;
 
-  const oldValue = keepValue ? select.value : '';
-  select.innerHTML = '<option value="">-- Chọn mã máy --</option>';
+  const oldValue = keepValue ? input.value : '';
 
-  APP.may
+  MACHINE_CACHE = APP.may
     .filter(m => getMayCode(m))
-    .sort((a, b) => getMayCode(a).localeCompare(getMayCode(b), 'vi'))
-    .forEach(m => {
-      const maMay = getMayCode(m);
-      const opt = document.createElement('option');
-      opt.value = maMay;
-      opt.textContent = maMay;
-      opt.dataset.tenTrai = getTenTrai(m);
-      opt.dataset.donVi = getDonVi(m);
-      opt.dataset.khuVuc = getKhuVuc(m);
-      opt.dataset.tinhTP = getTinhTP(m);
-      select.appendChild(opt);
-    });
+    .sort((a, b) => getMayCode(a).localeCompare(getMayCode(b), 'vi'));
 
-  if (keepValue && oldValue) select.value = oldValue;
+  if (!keepValue) {
+    input.value = '';
+  }
+
+  renderMachinePopup(MACHINE_CACHE);
+
+  if (keepValue && oldValue) {
+    input.value = oldValue;
+  }
+
   onMayChange();
 }
+
+function openMachinePopup() {
+  filterMachinePopup();
+
+  const popup = document.getElementById('maMayPopup');
+  if (popup) popup.classList.remove('hidden');
+}
+
+function toggleMachinePopup() {
+  const popup = document.getElementById('maMayPopup');
+  if (!popup) return;
+
+  if (popup.classList.contains('hidden')) {
+    openMachinePopup();
+  } else {
+    popup.classList.add('hidden');
+  }
+}
+
+function filterMachinePopup() {
+  const input = document.getElementById('maMay');
+  if (!input) return;
+
+  const keyword = normText(input.value);
+
+  const list = MACHINE_CACHE.filter(may => {
+    if (!keyword) return true;
+
+    const haystack = normText([
+      getMayCode(may),
+      getTenTrai(may),
+      getDonVi(may),
+      getKhuVuc(may),
+      getTinhTP(may),
+      getAllObjectValuesText(may)
+    ].join(' '));
+
+    return haystack.includes(keyword);
+  });
+
+  renderMachinePopup(list);
+
+  const popup = document.getElementById('maMayPopup');
+  if (popup) popup.classList.remove('hidden');
+}
+
+function renderMachinePopup(list) {
+  const popup = document.getElementById('maMayPopup');
+  if (!popup) return;
+
+  if (!list.length) {
+    popup.innerHTML = '<div class="search-popup-empty">Không tìm thấy máy phù hợp.</div>';
+    return;
+  }
+
+  popup.innerHTML = list.map(may => {
+    const maMay = getMayCode(may);
+    const tenTrai = getTenTrai(may);
+    const donVi = getDonVi(may);
+    const tinhTP = getTinhTP(may);
+    const khuVuc = getKhuVuc(may);
+
+    return `
+      <button type="button" class="search-popup-item machine-item" onclick="selectMachinePopup('${escapeJs(maMay)}')">
+        <b>${escapeHtml(maMay)}</b>
+        <small>
+          ${escapeHtml(tenTrai || '')}
+          ${donVi ? ' - ' + escapeHtml(donVi) : ''}
+          ${tinhTP ? ' - ' + escapeHtml(tinhTP) : ''}
+          ${khuVuc ? ' - ' + escapeHtml(khuVuc) : ''}
+        </small>
+      </button>`;
+  }).join('');
+}
+
+function selectMachinePopup(maMay) {
+  setValue('maMay', maMay);
+
+  const popup = document.getElementById('maMayPopup');
+  if (popup) popup.classList.add('hidden');
+
+  onMayChange();
+}
+
+function getAllObjectValuesText(obj) {
+  if (!obj) return '';
+
+  return Object.keys(obj).map(k => {
+    const v = obj[k];
+    if (v === null || v === undefined) return '';
+    return String(v);
+  }).join(' ');
+}
+
+/****************************************************
+ * HỆ THỐNG / HIỆN TƯỢNG / THÀNH VIÊN
+ ****************************************************/
 
 function fillHienTuongSelect(keepValue) {
   const select = document.getElementById('hienTuong');
@@ -638,8 +804,8 @@ function renderMemberText() {
  ****************************************************/
 
 function onMayChange() {
-  const maMay = getValue('maMay');
-  const may = findMayByCode(maMay);
+  const maMayInput = getValue('maMay');
+  const may = findMayByCode(maMayInput);
 
   if (!may) {
     setText('tenTrai', '');
@@ -647,6 +813,12 @@ function onMayChange() {
     setText('khuVuc', '');
     setText('tinhTP', '');
     return;
+  }
+
+  const maMayChuan = getMayCode(may);
+
+  if (maMayInput !== maMayChuan) {
+    setValue('maMay', maMayChuan);
   }
 
   setText('tenTrai', getTenTrai(may));
@@ -1079,6 +1251,7 @@ function resetForm() {
   setValue('searchVatTu', '');
   onMucDichChange();
   resetSelectedMaterials();
+  closeAllSearchPopups();
 }
 
 function cancelEdit() {
