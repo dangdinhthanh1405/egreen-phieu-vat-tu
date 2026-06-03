@@ -16,6 +16,7 @@ let TOKEN = '';
 let CURRENT_USER = null;
 let ACCOUNT_CACHE = [];
 let SELECTED_MEMBERS = [];
+let KTV_NAME_CACHE = [];
 let AUTO_REFRESH_TIMER = null;
 let EDITING_MA_PHIEU = '';
 let IS_BUSY = false;
@@ -454,11 +455,55 @@ function showTab(tabId, btn) {
  ****************************************************/
 
 function fillKtvSelects(keepValue) {
-  const names = getKtvNames();
-  fillSelect('doiTruong', names, '-- Chọn đội trưởng --', keepValue);
-  fillSelect('nguoiXuatKho', names, '-- Chọn người xuất kho --', keepValue);
-  fillSelect('nguoiNhapKho', names, '-- Chọn người nhập kho --', keepValue);
+  KTV_NAME_CACHE = getKtvNames();
+
+  fillNameInput('doiTruong', KTV_NAME_CACHE, keepValue);
+  fillNameInput('nguoiXuatKho', KTV_NAME_CACHE, keepValue);
+  fillNameInput('nguoiNhapKho', KTV_NAME_CACHE, keepValue);
+
   renderMemberDropdown();
+}
+
+function fillNameInput(id, names, keepValue) {
+  const input = document.getElementById(id);
+  const list = document.getElementById(id + 'List');
+
+  if (!input || !list) return;
+
+  const oldValue = keepValue ? input.value : '';
+
+  if (!keepValue) {
+    input.value = '';
+  }
+
+  renderNameDatalist(id, names);
+
+  if (keepValue && oldValue) {
+    input.value = oldValue;
+  }
+}
+
+function filterNameInput(id) {
+  const input = document.getElementById(id);
+  if (!input) return;
+
+  const keyword = normText(input.value);
+
+  const names = KTV_NAME_CACHE.filter(name => {
+    if (!keyword) return true;
+    return normText(name).includes(keyword);
+  });
+
+  renderNameDatalist(id, names);
+}
+
+function renderNameDatalist(id, names) {
+  const list = document.getElementById(id + 'List');
+  if (!list) return;
+
+  list.innerHTML = names.map(name => {
+    return `<option value="${escapeHtml(name)}"></option>`;
+  }).join('');
 }
 
 function getKtvNames() {
