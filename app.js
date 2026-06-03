@@ -17,6 +17,7 @@ let CURRENT_USER = null;
 let ACCOUNT_CACHE = [];
 let SELECTED_MEMBERS = [];
 let KTV_NAME_CACHE = [];
+let MACHINE_CACHE = [];
 let AUTO_REFRESH_TIMER = null;
 let EDITING_MA_PHIEU = '';
 let IS_BUSY = false;
